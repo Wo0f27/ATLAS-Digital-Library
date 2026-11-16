@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QAbstractItemView,
+    QTabWidget, QTabBar,
 )
 
 from .catalog import Catalog
 from .scanner import scan_library
+from .reader import PdfReader
 
 
 class ScanThread(QThread):
@@ -57,7 +59,7 @@ def placeholder_icon() -> QIcon:
 class LibraryWindow(QMainWindow):
     def __init__(self, data_dir: Path, initial_root: Path):
         super().__init__()
-        self.setWindowTitle("A.T.L.A.S. Digital Library — Foundation")
+        self.setWindowTitle("A.T.L.A.S. Digital Library")
         self.resize(1220, 780)
         self.data_dir = data_dir
         self.database_path = data_dir / "catalog.sqlite3"
@@ -66,6 +68,7 @@ class LibraryWindow(QMainWindow):
         self.root = initial_root.expanduser().resolve()
         self.settings = QSettings("ATLAS", "DigitalLibrary")
         self.books: dict[str, dict] = {}
+        self.reader_tabs: dict[str, PdfReader] = {}
         self.worker: ScanThread | None = None
         self.active_folder = ""
         self.selected_path = ""
@@ -78,7 +81,14 @@ class LibraryWindow(QMainWindow):
 
     def _build_ui(self):
         container = QWidget()
-        self.setCentralWidget(container)
+        self.tabs = QTabWidget(self)
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self._close_reader_tab)
+        self.setCentralWidget(self.tabs)
+        self.tabs.addTab(container, "Bookshelf")
+        self.tabs.tabBar().setTabButton(
+            0, QTabBar.ButtonPosition.RightSide, None
+        )
         outer = QVBoxLayout(container)
 
         header = QHBoxLayout()
@@ -137,10 +147,14 @@ class LibraryWindow(QMainWindow):
         self.detail_info = QLabel("")
         self.detail_info.setWordWrap(True)
         details.addWidget(self.detail_info)
-        self.open_btn = QPushButton("Open PDF in default reader")
+        self.open_btn = QPushButton("Read inside A.T.L.A.S.")
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self.open_book)
         details.addWidget(self.open_btn)
+        self.external_btn = QPushButton("Open in default PDF reader")
+        self.external_btn.setEnabled(False)
+        self.external_btn.clicked.connect(self.open_external)
+        details.addWidget(self.external_btn)
         details.addStretch()
         splitter.addWidget(right)
         splitter.setSizes([205, 765, 250])
@@ -163,6 +177,12 @@ class LibraryWindow(QMainWindow):
             QListWidget::item:selected, QTreeWidget::item:selected {
                 background: #596075; color: white; }
             QSplitter::handle { background: #313b4b; }
+            QTabWidget::pane { border: 1px solid #39475a; }
+            QTabBar::tab { background: #252f3d; color: #e4dccb;
+                           padding: 10px 15px; }
+            QTabBar::tab:selected { background: #46536a; }
+            QComboBox, QTreeView { background: #222b37; color: #ece6d9;
+                                   border: 1px solid #435166; padding: 5px; }
         """)
 
     def _load_existing(self):
@@ -284,6 +304,7 @@ class LibraryWindow(QMainWindow):
         if self.gallery.currentItem() is None:
             self.selected_path = ""
             self.open_btn.setEnabled(False)
+            self.external_btn.setEnabled(False)
             self.detail_title.setText("")
             self.detail_info.setText("")
             self.detail_cover.clear()
@@ -313,8 +334,32 @@ class LibraryWindow(QMainWindow):
         else:
             self.detail_cover.setText("No cover preview")
         self.open_btn.setEnabled(Path(path).is_file())
+        self.external_btn.setEnabled(Path(path).is_file())
 
     def open_book(self):
+        """Open one PDF in an internal tab, without launching another app."""
+        if not self.selected_path:
+            return
+        path = Path(self.selected_path)
+        if not path.is_file():
+            QMessageBox.warning(self, "Missing file", "The PDF is no longer at its cataloged path.")
+            return
+        key = str(path)
+        existing = self.reader_tabs.get(key)
+        if existing is not None:
+            self.tabs.setCurrentWidget(existing)
+            return
+        try:
+            reader = PdfReader(path, self.catalog, self.tabs)
+        except Exception as exc:
+            QMessageBox.warning(self, "Reader error", f"Unable to open PDF:\n{exc}")
+            return
+        self.reader_tabs[key] = reader
+        index = self.tabs.addTab(reader, path.stem[:34])
+        self.tabs.setTabToolTip(index, str(path))
+        self.tabs.setCurrentIndex(index)
+
+    def open_external(self):
         if not self.selected_path:
             return
         path = Path(self.selected_path)
@@ -324,10 +369,22 @@ class LibraryWindow(QMainWindow):
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             QMessageBox.warning(self, "Could not open", "Windows could not open this PDF.")
 
+    def _close_reader_tab(self, index: int):
+        if index == 0:
+            return
+        reader = self.tabs.widget(index)
+        if isinstance(reader, PdfReader):
+            reader.dispose()
+            self.reader_tabs.pop(str(reader.path), None)
+        self.tabs.removeTab(index)
+        reader.deleteLater()
+
     def closeEvent(self, event):
         if self.worker is not None:
             self.worker.requestInterruption()
             self.worker.wait()
+        for reader in tuple(self.reader_tabs.values()):
+            reader.save_state()
         self.catalog.close()
         super().closeEvent(event)
 
