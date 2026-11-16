@@ -179,3 +179,18 @@ def test_search_validation_and_fts_injection_safety(tmp_path: Path):
         index.search('"unclosed phrase', tmp_path, mode="advanced")
     assert index.search("dragon'); DROP TABLE page_text; --", tmp_path, mode="words") == []
     index.close()
+
+
+def test_reassigning_same_pdf_to_new_root_preserves_index(tmp_path: Path):
+    root = tmp_path / "books"
+    root.mkdir()
+    pdf = root / "Book.pdf"
+    make_text_pdf(pdf, ["This historic monster manual contains many ancient dragons."])
+    db = PageIndex(tmp_path / "search.sqlite3")
+    index_pdf(db, pdf, root)
+    assert len(db.search("manual", root)) == 1
+    broader_root = tmp_path
+    assert index_pdf(db, pdf, broader_root)["indexed"] == 0
+    assert len(db.search("manual", broader_root)) == 1
+    assert db.search("manual", root) == []
+    db.close()
