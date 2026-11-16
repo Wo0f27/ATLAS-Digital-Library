@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt, QThread, QUrl, Signal, QTimer
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
@@ -134,19 +134,34 @@ class LibraryWindow(QMainWindow):
         splitter.addWidget(self.gallery)
 
         right = QWidget()
+        self.preview_panel = right
+        # Long filenames and deep folders must never resize the preview pane.
+        right.setFixedWidth(285)
+        splitter.setCollapsible(2, False)
+        splitter.setStretchFactor(1, 1)
         details = QVBoxLayout(right)
         details.addWidget(QLabel("BOOK DETAILS"))
         self.detail_cover = QLabel("Select a book")
         self.detail_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.detail_cover.setMinimumHeight(245)
+        self.detail_cover.setFixedHeight(245)
         details.addWidget(self.detail_cover)
         self.detail_title = QLabel("")
-        self.detail_title.setWordWrap(True)
+        self.detail_title.setWordWrap(False)
+        self.detail_title.setFixedHeight(35)
+        self.detail_title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.detail_title.setObjectName("detailTitle")
         details.addWidget(self.detail_title)
         self.detail_info = QLabel("")
-        self.detail_info.setWordWrap(True)
+        self.detail_info.setWordWrap(False)
+        self.detail_info.setFixedHeight(100)
         details.addWidget(self.detail_info)
+        self.detail_warning = QLabel("")
+        self.detail_warning.setFixedHeight(22)
+        details.addWidget(self.detail_warning)
+        self.copy_path_btn = QPushButton("Copy full file path")
+        self.copy_path_btn.setEnabled(False)
+        self.copy_path_btn.clicked.connect(self.copy_full_path)
+        details.addWidget(self.copy_path_btn)
         self.open_btn = QPushButton("Read inside A.T.L.A.S.")
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self.open_book)
@@ -157,7 +172,7 @@ class LibraryWindow(QMainWindow):
         details.addWidget(self.external_btn)
         details.addStretch()
         splitter.addWidget(right)
-        splitter.setSizes([205, 765, 250])
+        splitter.setSizes([205, 765, 285])
 
         self.status = QLabel("Choose a library folder to get started.")
         outer.addWidget(self.status)
@@ -305,6 +320,9 @@ class LibraryWindow(QMainWindow):
             self.selected_path = ""
             self.open_btn.setEnabled(False)
             self.external_btn.setEnabled(False)
+            self.copy_path_btn.setEnabled(False)
+            self.detail_warning.setText("")
+            self.detail_warning.setToolTip("")
             self.detail_title.setText("")
             self.detail_info.setText("")
             self.detail_cover.clear()
@@ -318,13 +336,33 @@ class LibraryWindow(QMainWindow):
         if not book:
             return
         self.selected_path = path
-        self.detail_title.setText(book["title"])
+        self.detail_title.setText(
+            QFontMetrics(self.detail_title.font()).elidedText(
+                book["title"], Qt.TextElideMode.ElideRight, 255
+            )
+        )
+        self.detail_title.setToolTip(book["title"])
         size_mb = book["size_bytes"] / (1024 * 1024)
         pages = book["page_count"] if book["page_count"] is not None else "Unknown"
-        self.detail_info.setText(
-            f"Pages: {pages}\nSize: {size_mb:.1f} MB\n\nLocation:\n{path}"
-            + (f"\n\nCover unavailable: {book['scan_error']}" if book["scan_error"] else "")
+        try:
+            folder = str(Path(path).parent.relative_to(self.root))
+        except ValueError:
+            folder = str(Path(path).parent)
+        if folder == ".":
+            folder = "(Library root)"
+        folder_display = QFontMetrics(self.detail_info.font()).elidedText(
+            folder, Qt.TextElideMode.ElideMiddle, 252
         )
+        self.detail_info.setText(
+            f"Pages: {pages}\nSize: {size_mb:.1f} MB\n\nFolder:\n{folder_display}"
+        )
+        self.detail_info.setToolTip(str(path))
+        if book["scan_error"]:
+            self.detail_warning.setText("Cover preview unavailable")
+            self.detail_warning.setToolTip(book["scan_error"])
+        else:
+            self.detail_warning.clear()
+            self.detail_warning.setToolTip("")
         pix = QPixmap(book["cover_path"]) if book["cover_path"] else QPixmap()
         if not pix.isNull():
             self.detail_cover.setPixmap(
@@ -335,6 +373,11 @@ class LibraryWindow(QMainWindow):
             self.detail_cover.setText("No cover preview")
         self.open_btn.setEnabled(Path(path).is_file())
         self.external_btn.setEnabled(Path(path).is_file())
+        self.copy_path_btn.setEnabled(True)
+
+    def copy_full_path(self):
+        if self.selected_path:
+            QApplication.clipboard().setText(self.selected_path)
 
     def open_book(self):
         """Open one PDF in an internal tab, without launching another app."""
