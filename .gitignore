@@ -1,0 +1,39 @@
+# Local environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# User library content and local state (never commit)
+*.pdf
+*.epub
+*.mobi
+*.azw
+*.azw3
+*.zip
+*.7z
+*.rar
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+thumbnails/
+cache/
+local_data/
+.env
+*.log
+
+# IDE and system
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
