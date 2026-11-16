@@ -52,6 +52,15 @@ def test_ctrl_wheel_zoom_preserves_smooth_initial_fit(tmp_path: Path):
     assert reader.view.zoomFactor() == pytest.approx(
         min(5.0, max(.25, fit_factor * 1.12)), rel=0.04
     )
+    # The temporary preview should cover Qt's uncached white page rendering.
+    assert reader._zoom_overlay.isVisible()
+    assert reader._zoom_frame is not None
+    assert not reader._zoom_overlay.pixmap().isNull()
+
+    from PySide6.QtTest import QTest
+    QTest.qWait(280)
+    assert not reader._zoom_overlay.isVisible()
+    assert reader._zoom_frame is None
 
     after_zoom = reader.view.zoomFactor()
     regular = _wheel(Qt.KeyboardModifier.NoModifier)

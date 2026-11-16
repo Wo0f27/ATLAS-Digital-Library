@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
     QTreeView, QVBoxLayout, QWidget,
@@ -66,6 +66,21 @@ class PdfReader(QWidget):
         self.save_timer.setSingleShot(True)
         self.save_timer.setInterval(700)
         self.save_timer.timeout.connect(self.save_state)
+
+        # QPdfView paints an empty white page while an uncached zoom size is
+        # being rasterized. Temporarily show the previous rendered frame,
+        # scaled to the new magnification, until the redraw settles.
+        self._zoom_overlay = QLabel(self.view.viewport())
+        self._zoom_overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self._zoom_overlay.hide()
+        self._zoom_frame: QPixmap | None = None
+        self._zoom_frame_factor = 1.0
+        self._zoom_overlay_timer = QTimer(self)
+        self._zoom_overlay_timer.setSingleShot(True)
+        self._zoom_overlay_timer.setInterval(220)
+        self._zoom_overlay_timer.timeout.connect(self._clear_zoom_overlay)
 
         self._build_ui()
         self.navigator.currentPageChanged.connect(self._page_changed)
@@ -281,6 +296,47 @@ class PdfReader(QWidget):
             return fit_width
         return min(fit_width, available_height / height)
 
+    def _show_zoom_preview(
+        self, current_factor: float, next_factor: float, anchor: QPointF
+    ):
+        """Mask transient blank Qt PDF paints with a scaled prior frame."""
+        viewport = self.view.viewport()
+        if not viewport.isVisible() or viewport.width() < 1 or viewport.height() < 1:
+            return
+        if self._zoom_frame is None:
+            frame = viewport.grab()
+            if frame.isNull():
+                return
+            self._zoom_frame = frame
+            self._zoom_frame_factor = max(0.001, current_factor)
+
+        dpr = max(1.0, viewport.devicePixelRatioF())
+        canvas = QPixmap(
+            QSize(max(1, round(viewport.width() * dpr)),
+                  max(1, round(viewport.height() * dpr)))
+        )
+        canvas.setDevicePixelRatio(dpr)
+        canvas.fill(QColor("#202834"))
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        scale = next_factor / self._zoom_frame_factor
+        painter.translate(anchor.x(), anchor.y())
+        painter.scale(scale, scale)
+        painter.translate(-anchor.x(), -anchor.y())
+        painter.drawPixmap(0, 0, self._zoom_frame)
+        painter.end()
+
+        self._zoom_overlay.setGeometry(viewport.rect())
+        self._zoom_overlay.setPixmap(canvas)
+        self._zoom_overlay.show()
+        self._zoom_overlay.raise_()
+        self._zoom_overlay_timer.start()
+
+    def _clear_zoom_overlay(self):
+        self._zoom_overlay.hide()
+        self._zoom_overlay.clear()
+        self._zoom_frame = None
+
     def _zoom(self, multiplier: float, anchor: QPointF | None = None):
         if not self._loaded or multiplier <= 0:
             return
@@ -291,6 +347,7 @@ class PdfReader(QWidget):
         viewport = self.view.viewport()
         if anchor is None:
             anchor = QPointF(viewport.width() / 2.0, viewport.height() / 2.0)
+        self._show_zoom_preview(old_factor, new_factor, anchor)
         # Preserve approximately the content under the mouse/trackpad cursor.
         horizontal = self.view.horizontalScrollBar()
         vertical = self.view.verticalScrollBar()
@@ -369,5 +426,7 @@ class PdfReader(QWidget):
         )
 
     def dispose(self):
+        self._zoom_overlay_timer.stop()
+        self._clear_zoom_overlay()
         self.save_state()
         self.document.close()
