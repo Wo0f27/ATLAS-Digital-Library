@@ -50,6 +50,33 @@ class Catalog:
             )
             """
         )
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS book_profile (
+                path TEXT PRIMARY KEY,
+                favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0, 1)),
+                reading_status TEXT NOT NULL DEFAULT 'unread'
+                    CHECK(reading_status IN ('unread', 'reading', 'finished')),
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS page_bookmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                page_index INTEGER NOT NULL CHECK(page_index >= 0),
+                label TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(path, page_index, label)
+            )
+            """
+        )
+        self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_page_bookmarks_path "
+            "ON page_bookmarks(path, page_index, id)"
+        )
         self.connection.commit()
 
     def close(self) -> None:
@@ -169,3 +196,89 @@ class Catalog:
                     float(zoom_factor), page_mode, _utc_now(),
                 ),
             )
+
+
+    def get_profile(self, path: Path | str) -> dict:
+        """Book favorites and reading status, independent of PDF metadata."""
+        row = self.connection.execute(
+            "SELECT favorite, reading_status FROM book_profile WHERE path = ?",
+            (str(path),),
+        ).fetchone()
+        return {
+            "favorite": bool(row["favorite"]) if row else False,
+            "reading_status": row["reading_status"] if row else "unread",
+        }
+
+    def set_favorite(self, path: Path | str, favorite: bool) -> None:
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO book_profile(path, favorite, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                  favorite = excluded.favorite,
+                  updated_at = excluded.updated_at
+                """,
+                (str(path), int(bool(favorite)), _utc_now()),
+            )
+
+    def set_reading_status(self, path: Path | str, status: str) -> None:
+        if status not in {"unread", "reading", "finished"}:
+            raise ValueError(f"Unsupported reading status: {status}")
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO book_profile(path, reading_status, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                  reading_status = excluded.reading_status,
+                  updated_at = excluded.updated_at
+                """,
+                (str(path), status, _utc_now()),
+            )
+
+    def list_bookmarks(self, path: Path | str) -> list[dict]:
+        rows = self.connection.execute(
+            """
+            SELECT id, path, page_index, label, created_at
+            FROM page_bookmarks
+            WHERE path = ?
+            ORDER BY page_index, id
+            """,
+            (str(path),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_bookmark(self, path: Path | str, page_index: int, label: str) -> int:
+        if int(page_index) < 0:
+            raise ValueError("Bookmark page cannot be negative")
+        label = label.strip()
+        if not label or len(label) > 150:
+            raise ValueError("Bookmark label must contain 1-150 characters")
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT OR IGNORE INTO page_bookmarks (
+                    path, page_index, label, created_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (str(path), int(page_index), label, _utc_now()),
+            )
+            row = self.connection.execute(
+                """
+                SELECT id FROM page_bookmarks
+                WHERE path = ? AND page_index = ? AND label = ?
+                """,
+                (str(path), int(page_index), label),
+            ).fetchone()
+        assert row is not None
+        return int(row["id"])
+
+    def delete_bookmark(self, path: Path | str, bookmark_id: int) -> bool:
+        """Restrict deletion to a bookmark belonging to the given book."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "DELETE FROM page_bookmarks WHERE path = ? AND id = ?",
+                (str(path), int(bookmark_id)),
+            )
+        return cursor.rowcount > 0
