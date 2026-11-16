@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import sqlite3
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt, QThread, QUrl, Signal, QTimer
@@ -11,12 +12,13 @@ from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QAbstractItemView,
-    QTabWidget, QTabBar, QComboBox, QCheckBox,
+    QTabWidget, QTabBar, QComboBox, QCheckBox, QDialog, QInputDialog,
 )
 
 from .catalog import Catalog
 from .scanner import scan_library
 from .reader import PdfReader
+from .organizer import MetadataDialog, CollectionMembershipDialog
 
 
 class ScanThread(QThread):
@@ -72,6 +74,7 @@ class LibraryWindow(QMainWindow):
         self.worker: ScanThread | None = None
         self.active_folder = ""
         self.selected_path = ""
+        self._nav_refreshing = False
         self._empty_cover = placeholder_icon()
         self._build_ui()
         self._set_theme()
@@ -123,11 +126,47 @@ class LibraryWindow(QMainWindow):
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("FOLDERS"))
+        self.navigation_tabs = QTabWidget()
+        left_layout.addWidget(self.navigation_tabs)
+
+        folders_page = QWidget()
+        folders_layout = QVBoxLayout(folders_page)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.itemSelectionChanged.connect(self._select_folder)
-        left_layout.addWidget(self.tree)
+        folders_layout.addWidget(self.tree)
+        self.navigation_tabs.addTab(folders_page, "Folders")
+
+        collections_page = QWidget()
+        collections_layout = QVBoxLayout(collections_page)
+        self.collection_list = QListWidget()
+        self.collection_list.currentItemChanged.connect(
+            lambda _new, _old: self._refresh_gallery()
+        )
+        collections_layout.addWidget(self.collection_list, 1)
+        collection_actions = QHBoxLayout()
+        self.collection_create_btn = QPushButton("+")
+        self.collection_create_btn.setToolTip("Create a virtual shelf")
+        self.collection_create_btn.clicked.connect(self._create_collection)
+        collection_actions.addWidget(self.collection_create_btn)
+        self.collection_rename_btn = QPushButton("Rename")
+        self.collection_rename_btn.clicked.connect(self._rename_collection)
+        collection_actions.addWidget(self.collection_rename_btn)
+        self.collection_delete_btn = QPushButton("Delete")
+        self.collection_delete_btn.clicked.connect(self._delete_collection)
+        collection_actions.addWidget(self.collection_delete_btn)
+        collections_layout.addLayout(collection_actions)
+        self.navigation_tabs.addTab(collections_page, "Shelves")
+
+        tags_page = QWidget()
+        tags_layout = QVBoxLayout(tags_page)
+        self.tag_list = QListWidget()
+        self.tag_list.currentItemChanged.connect(
+            lambda _new, _old: self._refresh_gallery()
+        )
+        tags_layout.addWidget(self.tag_list)
+        self.navigation_tabs.addTab(tags_page, "Tags")
+        self.navigation_tabs.currentChanged.connect(self._refresh_gallery)
         splitter.addWidget(left)
 
         self.gallery = QListWidget()
@@ -179,6 +218,14 @@ class LibraryWindow(QMainWindow):
         self.reading_state.setEnabled(False)
         self.reading_state.currentIndexChanged.connect(self._change_reading_status)
         details.addWidget(self.reading_state)
+        self.edit_metadata_btn = QPushButton("Edit book details / tags")
+        self.edit_metadata_btn.setEnabled(False)
+        self.edit_metadata_btn.clicked.connect(self._edit_metadata)
+        details.addWidget(self.edit_metadata_btn)
+        self.assign_shelves_btn = QPushButton("Add to virtual shelves")
+        self.assign_shelves_btn.setEnabled(False)
+        self.assign_shelves_btn.clicked.connect(self._edit_book_collections)
+        details.addWidget(self.assign_shelves_btn)
         self.copy_path_btn = QPushButton("Copy full file path")
         self.copy_path_btn.setEnabled(False)
         self.copy_path_btn.clicked.connect(self.copy_full_path)
@@ -224,6 +271,7 @@ class LibraryWindow(QMainWindow):
     def _load_existing(self):
         self.books = {book["path"]: book for book in self.catalog.available(self.root)}
         self._refresh_folders()
+        self._refresh_navigation()
         self._refresh_gallery()
         self.status.setText(f"{len(self.books)} cataloged books | {self.root}")
 
@@ -304,27 +352,140 @@ class LibraryWindow(QMainWindow):
         self.tree.setCurrentItem(chosen)
         self.tree.blockSignals(False)
 
+    def _refresh_navigation(self):
+        """Refresh virtual shelves and tags while keeping valid selections."""
+        self._nav_refreshing = True
+        try:
+            selected_collection = self._selected_collection()
+            selected_tag = self._selected_tag()
+            self.collection_list.blockSignals(True)
+            self.collection_list.clear()
+            for collection in self.catalog.list_collections():
+                item = QListWidgetItem(collection["name"])
+                item.setData(Qt.ItemDataRole.UserRole, collection["id"])
+                self.collection_list.addItem(item)
+                if collection["id"] == selected_collection:
+                    self.collection_list.setCurrentItem(item)
+            self.collection_list.blockSignals(False)
+
+            self.tag_list.blockSignals(True)
+            self.tag_list.clear()
+            for tag in self.catalog.list_tags(self.root):
+                item = QListWidgetItem(tag)
+                item.setData(Qt.ItemDataRole.UserRole, tag)
+                self.tag_list.addItem(item)
+                if tag.casefold() == (selected_tag or "").casefold():
+                    self.tag_list.setCurrentItem(item)
+            self.tag_list.blockSignals(False)
+        finally:
+            self.collection_list.blockSignals(False)
+            self.tag_list.blockSignals(False)
+            self._nav_refreshing = False
+
+    def _selected_collection(self) -> int | None:
+        item = self.collection_list.currentItem()
+        return int(item.data(Qt.ItemDataRole.UserRole)) if item else None
+
+    def _selected_tag(self) -> str | None:
+        item = self.tag_list.currentItem()
+        return str(item.data(Qt.ItemDataRole.UserRole)) if item else None
+
+    def _create_collection(self):
+        name, ok = QInputDialog.getText(self, "New virtual shelf", "Shelf name:")
+        if not ok:
+            return
+        try:
+            new_id = self.catalog.create_collection(name)
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            QMessageBox.warning(self, "Cannot create shelf", str(exc))
+            return
+        self._refresh_navigation()
+        self.navigation_tabs.setCurrentIndex(1)
+        for index in range(self.collection_list.count()):
+            item = self.collection_list.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) == new_id:
+                self.collection_list.setCurrentItem(item)
+                break
+
+    def _rename_collection(self):
+        item = self.collection_list.currentItem()
+        if item is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, "Rename virtual shelf", "Shelf name:", text=item.text()
+        )
+        if not ok:
+            return
+        try:
+            self.catalog.rename_collection(
+                item.data(Qt.ItemDataRole.UserRole), name
+            )
+        except (ValueError, sqlite3.IntegrityError) as exc:
+            QMessageBox.warning(self, "Cannot rename shelf", str(exc))
+            return
+        self._refresh_navigation()
+        self._refresh_gallery()
+
+    def _delete_collection(self):
+        item = self.collection_list.currentItem()
+        if item is None:
+            return
+        answer = QMessageBox.question(
+            self, "Delete virtual shelf",
+            f"Delete the virtual shelf “{item.text()}”?\n"
+            "This removes only its shelf membership. No PDFs will be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.catalog.delete_collection(item.data(Qt.ItemDataRole.UserRole))
+        self._refresh_navigation()
+        self._refresh_gallery()
+
     def _select_folder(self):
         item = self.tree.currentItem()
         self.active_folder = str(item.data(0, Qt.ItemDataRole.UserRole) or "") if item else ""
         self._refresh_gallery()
 
     def _refresh_gallery(self):
+        if self._nav_refreshing:
+            return
         query = self.search.text().strip().casefold()
+        nav_index = self.navigation_tabs.currentIndex()
+        collection_id = self._selected_collection() if nav_index == 1 else None
+        tag = self._selected_tag() if nav_index == 2 else None
+        collection_paths = (
+            self.catalog.get_collection_paths(collection_id)
+            if collection_id is not None else None
+        )
+        tag_paths = self.catalog.paths_for_tag(tag) if tag else None
         self.gallery.blockSignals(True)
         self.gallery.clear()
         visible = 0
-        for book in sorted(self.books.values(), key=lambda b: b["title"].casefold()):
+        for book in sorted(
+            self.books.values(),
+            key=lambda b: (b.get("display_title") or b["title"]).casefold(),
+        ):
             try:
                 relative = Path(book["path"]).relative_to(self.root)
             except ValueError:
                 continue
-            if self.active_folder:
+            if nav_index == 0 and self.active_folder:
                 prefix = self.active_folder.replace("/", "\\") if sys.platform == "win32" else self.active_folder
                 relative_parent = str(relative.parent)
                 if relative_parent != prefix and not relative_parent.startswith(prefix + ("\\" if sys.platform == "win32" else "/")):
                     continue
-            if query and query not in book["title"].casefold() and query not in relative.as_posix().casefold():
+            title = book.get("display_title") or book["title"]
+            if query and not any(
+                query in value.casefold() for value in (
+                    title, book["title"], relative.as_posix(),
+                )
+            ):
+                continue
+            if collection_paths is not None and book["path"] not in collection_paths:
+                continue
+            if tag_paths is not None and book["path"] not in tag_paths:
                 continue
             profile = self.catalog.get_profile(book["path"])
             filter_by = self.view_filter.currentData()
@@ -334,7 +495,7 @@ class LibraryWindow(QMainWindow):
                 continue
             pix = QPixmap(book["cover_path"]) if book["cover_path"] else QPixmap()
             icon = QIcon(pix) if not pix.isNull() else self._empty_cover
-            item = QListWidgetItem(icon, ("★ " if profile["favorite"] else "") + book["title"])
+            item = QListWidgetItem(icon, ("★ " if profile["favorite"] else "") + title)
             item.setData(Qt.ItemDataRole.UserRole, book["path"])
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter)
             item.setToolTip(str(relative))
@@ -348,6 +509,8 @@ class LibraryWindow(QMainWindow):
             self.open_btn.setEnabled(False)
             self.external_btn.setEnabled(False)
             self.copy_path_btn.setEnabled(False)
+            self.edit_metadata_btn.setEnabled(False)
+            self.assign_shelves_btn.setEnabled(False)
             self.favorite_check.blockSignals(True)
             self.favorite_check.setChecked(False)
             self.favorite_check.setEnabled(False)
@@ -362,6 +525,8 @@ class LibraryWindow(QMainWindow):
             self.detail_info.setText("")
             self.detail_cover.clear()
         self.status.setText(f"{visible} visible books | {len(self.books)} cataloged")
+        if self.gallery.currentItem() is not None:
+            self._select_book(self.gallery.currentItem(), None)
 
     def _select_book(self, current, _previous):
         if not current:
@@ -371,12 +536,13 @@ class LibraryWindow(QMainWindow):
         if not book:
             return
         self.selected_path = path
+        display_title = book.get("display_title") or book["title"]
         self.detail_title.setText(
             QFontMetrics(self.detail_title.font()).elidedText(
-                book["title"], Qt.TextElideMode.ElideRight, 255
+                display_title, Qt.TextElideMode.ElideRight, 255
             )
         )
-        self.detail_title.setToolTip(book["title"])
+        self.detail_title.setToolTip(display_title)
         profile = self.catalog.get_profile(path)
         self.favorite_check.blockSignals(True)
         self.favorite_check.setChecked(profile["favorite"])
@@ -420,10 +586,57 @@ class LibraryWindow(QMainWindow):
         self.open_btn.setEnabled(Path(path).is_file())
         self.external_btn.setEnabled(Path(path).is_file())
         self.copy_path_btn.setEnabled(True)
+        self.edit_metadata_btn.setEnabled(True)
+        self.assign_shelves_btn.setEnabled(True)
 
     def copy_full_path(self):
         if self.selected_path:
             QApplication.clipboard().setText(self.selected_path)
+
+    def _edit_metadata(self):
+        if not self.selected_path:
+            return
+        path = self.selected_path
+        book = self.books.get(path)
+        if not book:
+            return
+        dialog = MetadataDialog(
+            path, book["title"], self.catalog.get_metadata(path), self
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.catalog.save_metadata(path, **dialog.values())
+        except (ValueError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Cannot save metadata", str(exc))
+            return
+        # Never overwrite the scanned filename title or change the PDF itself.
+        self._load_existing()
+        if path in self.books:
+            self.selected_path = path
+            self._refresh_gallery()
+
+    def _edit_book_collections(self):
+        if not self.selected_path:
+            return
+        path = self.selected_path
+        book = self.books.get(path)
+        if not book:
+            return
+        dialog = CollectionMembershipDialog(
+            book.get("display_title") or book["title"],
+            self.catalog.list_collections(),
+            self.catalog.get_book_collections(path),
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.catalog.set_book_collections(path, dialog.selected_ids())
+        except (ValueError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Cannot update virtual shelves", str(exc))
+            return
+        self._refresh_gallery()
 
     def _change_favorite(self, checked: bool):
         if not self.selected_path:
