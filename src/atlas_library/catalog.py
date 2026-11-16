@@ -38,6 +38,18 @@ class Catalog:
         self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_books_root ON books(library_root, status)"
         )
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reader_state (
+                path TEXT PRIMARY KEY,
+                page_index INTEGER NOT NULL DEFAULT 0,
+                zoom_mode TEXT NOT NULL DEFAULT 'width',
+                zoom_factor REAL NOT NULL DEFAULT 1.0,
+                page_mode TEXT NOT NULL DEFAULT 'continuous',
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         self.connection.commit()
 
     def close(self) -> None:
@@ -115,3 +127,45 @@ class Catalog:
                         "UPDATE books SET status = 'missing' WHERE path = ?",
                         (row["path"],),
                     )
+
+    def get_reader_state(self, path: Path | str) -> dict | None:
+        """Get the last reading position for a specific physical book."""
+        row = self.connection.execute(
+            "SELECT * FROM reader_state WHERE path = ?", (str(path),)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_reader_state(
+        self,
+        path: Path | str,
+        *,
+        page_index: int,
+        zoom_mode: str,
+        zoom_factor: float,
+        page_mode: str,
+    ) -> None:
+        """Persist user reading state, separate from source PDFs and scan metadata."""
+        if zoom_mode not in ("width", "page", "custom"):
+            raise ValueError("Unsupported zoom mode")
+        if page_mode not in ("single", "continuous"):
+            raise ValueError("Unsupported page mode")
+        if not 0.25 <= float(zoom_factor) <= 5.0:
+            raise ValueError("Zoom factor out of range")
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO reader_state (
+                    path, page_index, zoom_mode, zoom_factor, page_mode, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET
+                    page_index = excluded.page_index,
+                    zoom_mode = excluded.zoom_mode,
+                    zoom_factor = excluded.zoom_factor,
+                    page_mode = excluded.page_mode,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(path), max(0, int(page_index)), zoom_mode,
+                    float(zoom_factor), page_mode, _utc_now(),
+                ),
+            )
