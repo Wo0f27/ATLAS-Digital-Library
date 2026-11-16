@@ -264,7 +264,7 @@ class PdfReader(QWidget):
         if mode == QPdfView.ZoomMode.Custom or self.document.pageCount() < 1:
             return self.view.zoomFactor()
         page = clamp_page(self.navigator.currentPage(), self.document.pageCount())
-        size = self.document.pageSize(page)
+        size = self.document.pagePointSize(page)
         if size.width() <= 0 or size.height() <= 0:
             return self.view.zoomFactor()
         screen = QGuiApplication.primaryScreen()
