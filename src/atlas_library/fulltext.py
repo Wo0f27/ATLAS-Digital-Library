@@ -154,6 +154,15 @@ class PageIndex:
             and previous["page_count"] == pages
         )
         if unchanged:
+            if previous["library_root"] != str(root):
+                with self.connection:
+                    self.connection.execute(
+                        """
+                        UPDATE indexed_files SET library_root=?, updated_at=?
+                        WHERE path=?
+                        """,
+                        (str(root), _now(), str(path)),
+                    )
             return int(previous["next_page"])
         with self.connection:
             self.connection.execute("DELETE FROM page_text WHERE path=?", (str(path),))
