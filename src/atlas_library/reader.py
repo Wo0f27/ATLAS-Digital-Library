@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
 from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
     QTreeView, QVBoxLayout, QWidget,
@@ -230,6 +231,8 @@ class PdfReader(QWidget):
         """Leave ordinary scrolling alone; zoom only on explicit gestures."""
         if watched in (self.view, self.view.viewport()) and self._loaded:
             kind = event.type()
+            if kind == QEvent.Type.Resize:
+                QTimer.singleShot(0, lambda: self._zoom_changed(self.view.zoomFactor()))
             if kind == QEvent.Type.Wheel and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 angle = event.angleDelta().y()
                 pixels = event.pixelDelta().y()
@@ -255,10 +258,33 @@ class PdfReader(QWidget):
                     return True
         return super().eventFilter(watched, event)
 
+    def _effective_zoom(self) -> float:
+        """Actual visible scale, even when Qt is fitting a page automatically."""
+        mode = self.view.zoomMode()
+        if mode == QPdfView.ZoomMode.Custom or self.document.pageCount() < 1:
+            return self.view.zoomFactor()
+        page = clamp_page(self.navigator.currentPage(), self.document.pageCount())
+        size = self.document.pageSize(page)
+        if size.width() <= 0 or size.height() <= 0:
+            return self.view.zoomFactor()
+        screen = QGuiApplication.primaryScreen()
+        dpi_factor = (screen.logicalDotsPerInch() / 72.0) if screen else 1.0
+        width = size.width() * dpi_factor
+        height = size.height() * dpi_factor
+        margins = self.view.documentMargins()
+        viewport = self.view.viewport()
+        available_width = max(1, viewport.width() - margins.left() - margins.right())
+        available_height = max(1, viewport.height() - margins.top()
+                               - margins.bottom() - self.view.pageSpacing())
+        fit_width = available_width / width
+        if mode == QPdfView.ZoomMode.FitToWidth:
+            return fit_width
+        return min(fit_width, available_height / height)
+
     def _zoom(self, multiplier: float, anchor: QPointF | None = None):
         if not self._loaded or multiplier <= 0:
             return
-        old_factor = max(0.001, self.view.zoomFactor())
+        old_factor = max(0.001, self._effective_zoom())
         new_factor = max(0.25, min(5.0, old_factor * multiplier))
         if abs(new_factor - old_factor) < 0.0001:
             return
@@ -285,8 +311,8 @@ class PdfReader(QWidget):
         QTimer.singleShot(0, restore_anchor)
         self._schedule_save()
 
-    def _zoom_changed(self, factor: float):
-        self.zoom_readout.setText(f"{round(factor * 100)}%")
+    def _zoom_changed(self, _factor: float):
+        self.zoom_readout.setText(f"{round(self._effective_zoom() * 100)}%")
         self._schedule_save()
 
     def _set_zoom_mode(self, _index: int):
@@ -297,6 +323,7 @@ class PdfReader(QWidget):
             self.view.setZoomMode(QPdfView.ZoomMode.FitInView)
         else:
             self.view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self._zoom_changed(self.view.zoomFactor())
         self._schedule_save()
 
     def _set_page_mode(self, _index: int):
