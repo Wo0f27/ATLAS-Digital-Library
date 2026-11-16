@@ -19,6 +19,7 @@ from .catalog import Catalog
 from .scanner import scan_library
 from .reader import PdfReader
 from .organizer import MetadataDialog, CollectionMembershipDialog
+from .search_panel import SearchPanel
 
 
 class ScanThread(QThread):
@@ -232,7 +233,7 @@ class LibraryWindow(QMainWindow):
         details.addWidget(self.copy_path_btn)
         self.open_btn = QPushButton("Read inside A.T.L.A.S.")
         self.open_btn.setEnabled(False)
-        self.open_btn.clicked.connect(self.open_book)
+        self.open_btn.clicked.connect(lambda: self.open_book())
         details.addWidget(self.open_btn)
         self.external_btn = QPushButton("Open in default PDF reader")
         self.external_btn.setEnabled(False)
@@ -244,6 +245,18 @@ class LibraryWindow(QMainWindow):
 
         self.status = QLabel("Choose a library folder to get started.")
         outer.addWidget(self.status)
+
+        self.search_panel = SearchPanel(
+            self.data_dir / "search.sqlite3",
+            root_getter=lambda: self.root,
+            books_getter=lambda: self.books,
+            open_result=self._open_search_result,
+            parent=self.tabs,
+        )
+        self.tabs.addTab(self.search_panel, "Full-Text Search")
+        self.tabs.tabBar().setTabButton(
+            1, QTabBar.ButtonPosition.RightSide, None
+        )
 
     def _set_theme(self):
         self.setStyleSheet("""
@@ -653,8 +666,17 @@ class LibraryWindow(QMainWindow):
         self.catalog.set_reading_status(self.selected_path, status)
         self._refresh_gallery()
 
-    def open_book(self):
-        """Open one PDF in an internal tab, without launching another app."""
+    def _open_search_result(self, path: str, page_index: int):
+        if path not in self.books:
+            QMessageBox.warning(
+                self, "Book unavailable", "This indexed PDF is not in the active library."
+            )
+            return
+        self.selected_path = path
+        self.open_book(target_page=int(page_index))
+
+    def open_book(self, target_page: int | None = None):
+        """Open a PDF internally; optionally navigate to a 0-based search hit."""
         if not self.selected_path:
             return
         path = Path(self.selected_path)
@@ -665,16 +687,27 @@ class LibraryWindow(QMainWindow):
         profile = self.catalog.get_profile(key)
         if profile["reading_status"] == "unread":
             self.catalog.set_reading_status(key, "reading")
-            self.reading_state.blockSignals(True)
-            self.reading_state.setCurrentIndex(self.reading_state.findData("reading"))
-            self.reading_state.blockSignals(False)
+            selected = self.gallery.currentItem()
+            if selected and selected.data(Qt.ItemDataRole.UserRole) == key:
+                self.reading_state.blockSignals(True)
+                self.reading_state.setCurrentIndex(
+                    self.reading_state.findData("reading")
+                )
+                self.reading_state.blockSignals(False)
             self._refresh_gallery()
         existing = self.reader_tabs.get(key)
         if existing is not None:
             self.tabs.setCurrentWidget(existing)
+            if target_page is not None:
+                if existing._loaded:
+                    existing.goto_page(target_page)
+                else:
+                    QTimer.singleShot(0, lambda: existing.goto_page(target_page))
             return
         try:
-            reader = PdfReader(path, self.catalog, self.tabs)
+            reader = PdfReader(
+                path, self.catalog, self.tabs, start_page=target_page
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Reader error", f"Unable to open PDF:\n{exc}")
             return
@@ -694,7 +727,7 @@ class LibraryWindow(QMainWindow):
             QMessageBox.warning(self, "Could not open", "Windows could not open this PDF.")
 
     def _close_reader_tab(self, index: int):
-        if index == 0:
+        if index <= 1:
             return
         reader = self.tabs.widget(index)
         if isinstance(reader, PdfReader):
@@ -709,6 +742,7 @@ class LibraryWindow(QMainWindow):
             self.worker.wait()
         for reader in tuple(self.reader_tabs.values()):
             reader.save_state()
+        self.search_panel.shutdown()
         self.catalog.close()
         super().closeEvent(event)
 

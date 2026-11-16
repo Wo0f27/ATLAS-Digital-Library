@@ -30,7 +30,10 @@ class PdfReader(QWidget):
 
     failed = Signal(str)
 
-    def __init__(self, path: Path, catalog: Catalog, parent: QWidget | None = None):
+    def __init__(
+        self, path: Path, catalog: Catalog, parent: QWidget | None = None,
+        start_page: int | None = None,
+    ):
         super().__init__(parent)
         self.path = Path(path)
         self.catalog = catalog
@@ -38,6 +41,8 @@ class PdfReader(QWidget):
         self._restoring = True
         self._match_index = -1
         self._saved = catalog.get_reader_state(self.path) or {}
+        if start_page is not None:
+            self._saved["page_index"] = max(0, int(start_page))
 
         self.document = QPdfDocument(self)
         self.view = QPdfView(self)

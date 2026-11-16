@@ -22,17 +22,22 @@
 - [x] Favorite books, reading-status controls, filters, and manual page bookmarks
 - [x] Validate personal bookmarks/favorites and reading-status tracking on the user's Windows machine
 - [x] Metadata editing: display title, author(s), publisher, edition, year, system, description, notes
-- [ ] Validate metadata editor on user's Windows machine
+- [x] Validate metadata editor on user's Windows machine
 - [x] Virtual shelves, many-to-many book membership, and personal tags
-- [ ] Validate shelf management and tag filtering on user's Windows machine
+- [x] Validate shelf management and tag filtering on user's Windows machine
 
-## Milestone 3 — Full-text indexing and OCR
+## Milestone 3 — Full-text indexing and OCR (first implementation in progress)
 
-- Full PDF text indexing with page-level results
-- OCR for image-only and mixed PDFs, working offline
-- Resumable OCR jobs, status/errors, original PDF preservation
-- Advanced queries (phrases, Boolean, fuzzy/proximity search where supported)
-- Performance benchmarking against a growing library
+- [x] SQLite FTS5 page-level search with sourcebook/page navigation
+- [x] Extract existing text using PDFium
+- [x] Offline OCR via locally installed Tesseract for textless/near-empty pages
+- [x] Background indexer with cancellation, incremental updates, and per-page resume
+- [x] Search modes: all words, exact phrase, and user-authored FTS5 Boolean/NEAR
+- [ ] Validate indexing, page links, OCR, and resume on user's Windows library
+- [ ] OCR advanced handling for pages mixing substantial text and scanned images
+- [ ] Advanced fuzzy/proximity/regex search options and metadata facets
+- [ ] Search in reader highlights for OCR results
+- [ ] Performance benchmark and index-size checks on a large collection
 
 ## Milestone 4 — Organization and personalization
 
