@@ -20,6 +20,8 @@ def test_embedded_pdf_opens_and_remembers_page(tmp_path: Path):
 
     catalog = Catalog(tmp_path / "local.sqlite3")
     reader = PdfReader(pdf, catalog)
+    reader.resize(1100, 750)
+    reader.show()
     for _ in range(25):
         app.processEvents()
         if reader._loaded:
@@ -41,6 +43,8 @@ def test_embedded_pdf_opens_and_remembers_page(tmp_path: Path):
     assert state["page_mode"] == "single"
 
     reopened = PdfReader(pdf, catalog)
+    reopened.resize(1100, 750)
+    reopened.show()
     for _ in range(25):
         app.processEvents()
         if reopened._loaded:
