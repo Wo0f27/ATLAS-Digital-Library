@@ -261,7 +261,7 @@ class PdfReader(QWidget):
             self.path,
             page_index=clamp_page(self.navigator.currentPage(), self.document.pageCount()),
             zoom_mode=self.zoom_mode.currentData() or "width",
-            zoom_factor=self.view.zoomFactor(),
+            zoom_factor=max(0.25, min(5.0, self.view.zoomFactor())),
             page_mode=self.page_mode.currentData() or "continuous",
         )
 
