@@ -17,10 +17,12 @@
 - [x] Reader foundation: internal tabs, page navigation, zoom, table of contents, reading position
 - [x] Native continuous/single-page switching and in-book text search (text-layer PDFs)
 - [x] Validate reader on the user's Windows machine with real sourcebooks
-- [ ] Validate Ctrl+wheel zoom and Windows trackpad pinch on the user's hardware
-- [ ] Validate fixed-width bookshelf details sidebar on the user's hardware
-- Metadata editing, favorites, bookmarks, and reading status
-- Virtual collections and tags independent of physical file paths
+- [x] Validate Ctrl+wheel zoom and Windows trackpad pinch on the user's hardware
+- [x] Validate fixed-width bookshelf details sidebar on the user's hardware
+- [x] Favorite books, reading-status controls, filters, and manual page bookmarks
+- [ ] Validate personal bookmarks/favorites and reading-status tracking on the user's Windows machine
+- [ ] Metadata editing (display title, author, publisher, edition, personal notes)
+- [ ] Virtual collections and tags independent of physical file paths
 
 ## Milestone 3 — Full-text indexing and OCR
 
