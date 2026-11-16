@@ -2,20 +2,23 @@
 
 A native, offline-first Windows digital bookshelf for your personal document collection.
 
-**Development status:** Milestone 1 foundation. This is not yet the finished reader, OCR system, or packaged Windows executable.
+**Development status:** Milestone 2 (embedded reader, first increment). This is not yet the finished metadata/annotations system, OCR, full-text index, or Windows executable.
 
-## What works in this milestone
+## Currently implemented
 
 - Native PySide6 desktop window with a cover-based book gallery.
 - Read-only discovery of PDF files in a selected folder and its subfolders.
 - PDF first-page cover thumbnails, cached outside the repository.
 - SQLite catalog that survives application restarts.
 - Search by filename/title and browse by existing physical folders.
-- Open a selected PDF in the Windows default PDF application.
+- Double-click a book to read it in a tab inside A.T.L.A.S.
+- Embedded reader: previous/next page, page number jump, continuous or single-page mode, fit-to-width/page, custom zoom, PDF table of contents and in-book text search.
+- Last page and viewing preferences saved automatically in the local catalog.
+- Optional open in the Windows default PDF application.
 - Rescan the library for new, modified, and missing files.
 - Unit tests for catalog persistence and scanning.
 
-The app does **not** move, rename, delete, or edit your sourcebooks. It does **not** upload PDFs or extracted text to GitHub.
+The app does **not** move, rename, delete, or edit your sourcebooks. It does **not** upload PDFs or extracted text to GitHub. In-book search currently works only for PDFs with an existing text layer; image-only books will need the planned OCR phase.
 
 ## Setup: Windows / VS Code
 
@@ -48,7 +51,7 @@ You can change the location with the **Choose Folder** button. It is remembered 
 
 ## Upcoming work
 
-See docs/ROADMAP.md. The built-in PDF reader, OCR, DocGoblin-style full-text search, metadata editor, virtual shelves, theming, and standalone Windows .exe are planned features. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
+See docs/ROADMAP.md. The built-in PDF reader foundation is available now. OCR, DocGoblin-style library-wide full-text search, metadata editor, virtual shelves, theming, and standalone Windows .exe are still planned features. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
 
 ## Technology and licensing
 
