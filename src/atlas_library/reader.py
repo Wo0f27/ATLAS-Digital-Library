@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, Qt, QTimer, Signal
 from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
@@ -42,6 +42,11 @@ class PdfReader(QWidget):
         self.view.setDocument(self.document)
         self.view.setPageMode(QPdfView.PageMode.MultiPage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        # Trackpad pinch may arrive as a native gesture, a Qt pinch gesture,
+        # or Ctrl+wheel depending on Windows driver/Qt platform integration.
+        self.view.installEventFilter(self)
+        self.view.viewport().installEventFilter(self)
+        self.view.viewport().grabGesture(Qt.GestureType.PinchGesture)
         self.navigator = self.view.pageNavigator()
 
         self.bookmarks = QPdfBookmarkModel(self)
@@ -63,7 +68,7 @@ class PdfReader(QWidget):
 
         self._build_ui()
         self.navigator.currentPageChanged.connect(self._page_changed)
-        self.view.zoomFactorChanged.connect(lambda _factor: self._schedule_save())
+        self.view.zoomFactorChanged.connect(self._zoom_changed)
         self.search_model.countChanged.connect(self._on_search_count)
         self.document.statusChanged.connect(self._on_document_status)
 
@@ -96,11 +101,11 @@ class PdfReader(QWidget):
         toolbar.addWidget(self.next)
 
         self.zoom_out = QPushButton("-")
-        self.zoom_out.clicked.connect(lambda: self._zoom(0.8))
+        self.zoom_out.clicked.connect(lambda: self._zoom(1 / 1.12))
         toolbar.addWidget(self.zoom_out)
 
         self.zoom_in = QPushButton("+")
-        self.zoom_in.clicked.connect(lambda: self._zoom(1.25))
+        self.zoom_in.clicked.connect(lambda: self._zoom(1.12))
         toolbar.addWidget(self.zoom_in)
 
         self.zoom_mode = QComboBox()
@@ -109,6 +114,12 @@ class PdfReader(QWidget):
         self.zoom_mode.addItem("Custom zoom", "custom")
         self.zoom_mode.currentIndexChanged.connect(self._set_zoom_mode)
         toolbar.addWidget(self.zoom_mode)
+
+        self.zoom_readout = QLabel("100%")
+        self.zoom_readout.setFixedWidth(49)
+        self.zoom_readout.setToolTip("Zoom relative to the PDF page's point size")
+        self.zoom_readout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        toolbar.addWidget(self.zoom_readout)
 
         self.page_mode = QComboBox()
         self.page_mode.addItem("Continuous scroll", "continuous")
@@ -180,6 +191,7 @@ class PdfReader(QWidget):
             self._saved.get("page_index", 0), self.document.pageCount()
         ))
         self._restoring = False
+        self._zoom_changed(self.view.zoomFactor())
 
     def _fail(self, message: str):
         self.message.setText(message)
@@ -214,13 +226,67 @@ class PdfReader(QWidget):
         if page is not None:
             self.goto_page(int(page))
 
-    def _zoom(self, multiplier: float):
-        if not self._loaded:
+    def eventFilter(self, watched, event):
+        """Leave ordinary scrolling alone; zoom only on explicit gestures."""
+        if watched in (self.view, self.view.viewport()) and self._loaded:
+            kind = event.type()
+            if kind == QEvent.Type.Wheel and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                angle = event.angleDelta().y()
+                pixels = event.pixelDelta().y()
+                delta = (angle / 120.0) if angle else (pixels / 120.0)
+                if delta:
+                    self._zoom(1.12 ** delta, event.position())
+                    event.accept()
+                    return True
+            if kind == QEvent.Type.NativeGesture and event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+                # The Qt-native zoom value is an incremental scale delta.
+                magnitude = max(0.5, min(1.5, 1.0 + float(event.value())))
+                self._zoom(magnitude, event.position())
+                event.accept()
+                return True
+            if kind == QEvent.Type.Gesture:
+                pinch = event.gesture(Qt.GestureType.PinchGesture)
+                if pinch is not None:
+                    previous = float(pinch.lastScaleFactor())
+                    current = float(pinch.scaleFactor())
+                    if previous > 0 and current > 0:
+                        self._zoom(current / previous, pinch.centerPoint())
+                    event.accept()
+                    return True
+        return super().eventFilter(watched, event)
+
+    def _zoom(self, multiplier: float, anchor: QPointF | None = None):
+        if not self._loaded or multiplier <= 0:
             return
-        factor = max(0.25, min(5.0, self.view.zoomFactor() * multiplier))
+        old_factor = max(0.001, self.view.zoomFactor())
+        new_factor = max(0.25, min(5.0, old_factor * multiplier))
+        if abs(new_factor - old_factor) < 0.0001:
+            return
+        viewport = self.view.viewport()
+        if anchor is None:
+            anchor = QPointF(viewport.width() / 2.0, viewport.height() / 2.0)
+        # Preserve approximately the content under the mouse/trackpad cursor.
+        horizontal = self.view.horizontalScrollBar()
+        vertical = self.view.verticalScrollBar()
+        left, top = horizontal.value(), vertical.value()
+        self.zoom_mode.blockSignals(True)
         self.zoom_mode.setCurrentIndex(self.zoom_mode.findData("custom"))
+        self.zoom_mode.blockSignals(False)
         self.view.setZoomMode(QPdfView.ZoomMode.Custom)
-        self.view.setZoomFactor(factor)
+        self.view.setZoomFactor(new_factor)
+        ratio = new_factor / old_factor
+
+        def restore_anchor():
+            if not self._loaded:
+                return
+            horizontal.setValue(round((left + anchor.x()) * ratio - anchor.x()))
+            vertical.setValue(round((top + anchor.y()) * ratio - anchor.y()))
+
+        QTimer.singleShot(0, restore_anchor)
+        self._schedule_save()
+
+    def _zoom_changed(self, factor: float):
+        self.zoom_readout.setText(f"{round(factor * 100)}%")
         self._schedule_save()
 
     def _set_zoom_mode(self, _index: int):
