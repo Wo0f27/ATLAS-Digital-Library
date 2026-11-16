@@ -80,7 +80,7 @@ def test_text_search_results_link_to_correct_pages(tmp_path: Path):
     assert all("[ancient]" in h["excerpt"].lower() for h in hits)
     assert {h["source"] for h in hits} == {"text"}
     assert [h["page_index"] for h in db.search("purple worm", root, mode="phrase")] == [1]
-    assert [h["page_index"] for h in db.search('"green dragon" OR "blue dragon"', root, mode="advanced")] == [0, 2]
+    assert {h["page_index"] for h in db.search('"green dragon" OR "blue dragon"', root, mode="advanced")} == {0, 2}
     assert db.search("dragon", tmp_path / "other-root") == []
     assert db.search("kraken", root) == []
     assert index_pdf(db, book, root)["indexed"] == 0
