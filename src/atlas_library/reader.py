@@ -13,7 +13,8 @@ from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
-    QTreeView, QVBoxLayout, QWidget,
+    QTreeView, QVBoxLayout, QWidget, QListWidget, QListWidgetItem,
+    QTabWidget, QInputDialog, QMessageBox,
 )
 
 from .catalog import Catalog
@@ -83,6 +84,7 @@ class PdfReader(QWidget):
         self._zoom_overlay_timer.timeout.connect(self._clear_zoom_overlay)
 
         self._build_ui()
+        self._reload_bookmarks()
         self.navigator.currentPageChanged.connect(self._page_changed)
         self.view.zoomFactorChanged.connect(self._zoom_changed)
         self.search_model.countChanged.connect(self._on_search_count)
@@ -164,7 +166,23 @@ class PdfReader(QWidget):
         outer.addLayout(findbar)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.toc)
+        self.side_tabs = QTabWidget()
+        self.side_tabs.addTab(self.toc, "Contents")
+        bookmarks_widget = QWidget()
+        bookmarks_layout = QVBoxLayout(bookmarks_widget)
+        self.bookmark_list = QListWidget()
+        self.bookmark_list.itemDoubleClicked.connect(self._jump_to_bookmark)
+        bookmarks_layout.addWidget(self.bookmark_list, 1)
+        bookmark_buttons = QHBoxLayout()
+        self.add_bookmark_button = QPushButton("+ Save page")
+        self.add_bookmark_button.clicked.connect(self._add_bookmark)
+        bookmark_buttons.addWidget(self.add_bookmark_button)
+        self.remove_bookmark_button = QPushButton("Remove")
+        self.remove_bookmark_button.clicked.connect(self._remove_bookmark)
+        bookmark_buttons.addWidget(self.remove_bookmark_button)
+        bookmarks_layout.addLayout(bookmark_buttons)
+        self.side_tabs.addTab(bookmarks_widget, "My Bookmarks")
+        splitter.addWidget(self.side_tabs)
         splitter.addWidget(self.view)
         splitter.setSizes([220, 900])
         outer.addWidget(splitter, 1)
@@ -336,6 +354,55 @@ class PdfReader(QWidget):
         self._zoom_overlay.hide()
         self._zoom_overlay.clear()
         self._zoom_frame = None
+
+    def _reload_bookmarks(self):
+        self.bookmark_list.clear()
+        for row in self.catalog.list_bookmarks(self.path):
+            item = QListWidgetItem(
+                f"Page {row['page_index'] + 1} — {row['label']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, row["id"])
+            item.setData(Qt.ItemDataRole.UserRole + 1, row["page_index"])
+            self.bookmark_list.addItem(item)
+
+    def _add_bookmark(self):
+        if not self._loaded or self.document.pageCount() == 0:
+            return
+        page_index = clamp_page(self.navigator.currentPage(), self.document.pageCount())
+        label, accepted = QInputDialog.getText(
+            self, "Save page bookmark", "Bookmark label:",
+            text=f"Page {page_index + 1}",
+        )
+        if not accepted:
+            return
+        label = label.strip()
+        if not label:
+            return
+        try:
+            bookmark_id = self.catalog.add_bookmark(self.path, page_index, label)
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "Unable to save bookmark", str(exc))
+            return
+        self._reload_bookmarks()
+        for index in range(self.bookmark_list.count()):
+            item = self.bookmark_list.item(index)
+            if item.data(Qt.ItemDataRole.UserRole) == bookmark_id:
+                self.bookmark_list.setCurrentItem(item)
+                break
+        self.side_tabs.setCurrentIndex(1)
+
+    def _jump_to_bookmark(self, item: QListWidgetItem):
+        page = item.data(Qt.ItemDataRole.UserRole + 1)
+        if page is not None:
+            self.goto_page(int(page))
+
+    def _remove_bookmark(self):
+        item = self.bookmark_list.currentItem()
+        if item is None:
+            return
+        bookmark_id = item.data(Qt.ItemDataRole.UserRole)
+        if self.catalog.delete_bookmark(self.path, int(bookmark_id)):
+            self._reload_bookmarks()
 
     def _zoom(self, multiplier: float, anchor: QPointF | None = None):
         if not self._loaded or multiplier <= 0:
