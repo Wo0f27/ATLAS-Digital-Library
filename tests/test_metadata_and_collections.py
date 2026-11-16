@@ -47,7 +47,8 @@ def test_metadata_tags_shelves_persist_and_rescan_preserves_everything(tmp_path:
     catalog.add_bookmark(book_a, 42, "Important section")
     _index(catalog, book_a, root, changed=1)  # routine rescan
     assert catalog.get(book_a)["title"] == "Creature Guide"
-    assert catalog.available(root)[0]["display_title"] == "Dragon Studies: Definitive Edition"
+    by_path = {row["path"]: row for row in catalog.available(root)}
+    assert by_path[str(book_a)]["display_title"] == "Dragon Studies: Definitive Edition"
     assert catalog.get_book_tags(book_a) == ["Dragons", "Lore", "Rules"]
     assert catalog.paths_for_tag("DRAGONS") == {str(book_a)}
     assert set(catalog.list_tags(root)) == {"Dragons", "Lore", "Rules"}
