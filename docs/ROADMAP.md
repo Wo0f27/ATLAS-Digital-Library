@@ -20,9 +20,11 @@
 - [x] Validate Ctrl+wheel zoom and Windows trackpad pinch on the user's hardware
 - [x] Validate fixed-width bookshelf details sidebar on the user's hardware
 - [x] Favorite books, reading-status controls, filters, and manual page bookmarks
-- [ ] Validate personal bookmarks/favorites and reading-status tracking on the user's Windows machine
-- [ ] Metadata editing (display title, author, publisher, edition, personal notes)
-- [ ] Virtual collections and tags independent of physical file paths
+- [x] Validate personal bookmarks/favorites and reading-status tracking on the user's Windows machine
+- [x] Metadata editing: display title, author(s), publisher, edition, year, system, description, notes
+- [ ] Validate metadata editor on user's Windows machine
+- [x] Virtual shelves, many-to-many book membership, and personal tags
+- [ ] Validate shelf management and tag filtering on user's Windows machine
 
 ## Milestone 3 — Full-text indexing and OCR
 

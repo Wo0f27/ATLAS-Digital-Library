@@ -17,6 +17,9 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Personal named page bookmarks in a reader-side tab (save, reopen, remove).
 - Favorite flag and reading status (Unread, Currently Reading, Finished) per book.
 - Bookshelf filters for Favorites, Currently Reading, and Finished.
+- Editable, personal book metadata: title, author(s), publisher, edition/printing, publication year, system, description, and research notes.
+- Comma-separated tags; a book may have several tags, browsable from the Tags tab.
+- Virtual shelves (create, rename, delete, and assign books to several shelves) that never move or duplicate PDFs.
 - Ctrl+mouse-wheel/trackpad scrolling adjusts zoom smoothly; native pinch is supported when Qt and the trackpad driver deliver a zoom gesture.
 - The bookshelf details sidebar stays fixed-width; full file paths are in tooltips and a Copy full file path control.
 - Optional open in the Windows default PDF application.
@@ -41,6 +44,21 @@ The default library location is:
     C:\Users\Ian\Downloads\Telegram Desktop
 
 You can change the location with the **Choose Folder** button. It is remembered across launches. Your catalog and thumbnail cache are stored under the Windows per-user application data directory, not in this GitHub repository.
+
+## Personal catalog organization
+
+Select a book on the Bookshelf and choose **Edit book details / tags** to override its
+display title or supply bibliographic details. Editing the display title changes only
+how A.T.L.A.S. lists the book; its original filename is retained.
+
+Select **Add to virtual shelves** to place the book into multiple shelves.
+Use the **Shelves** tab in the left navigation to create, rename, or delete shelves.
+The **Tags** tab lists tags found on books in the active library folder.
+Existing physical folders remain browseable under **Folders**.
+
+All book metadata, personal notes, virtual shelves, and tags are saved in the local
+SQLite catalog and survive ordinary rescans. Deleting a virtual shelf only removes
+its membership records, never the original PDFs.
 
 ## Tests
 
