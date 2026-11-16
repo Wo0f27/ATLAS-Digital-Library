@@ -168,7 +168,17 @@ class PdfReader(QWidget):
         if saved_mode == "custom":
             self.view.setZoomMode(QPdfView.ZoomMode.Custom)
             self.view.setZoomFactor(max(0.25, min(5.0, float(self._saved.get("zoom_factor", 1)))))
-        self.goto_page(clamp_page(self._saved.get("page_index", 0), count))
+        # The widget is created before its tab becomes visible. Jumping too
+        # early may be reset by Qt during the first layout/scroll calculation.
+        QTimer.singleShot(0, self._restore_position)
+
+    def _restore_position(self):
+        if not self._loaded or self.document.pageCount() < 1:
+            self._restoring = False
+            return
+        self.goto_page(clamp_page(
+            self._saved.get("page_index", 0), self.document.pageCount()
+        ))
         self._restoring = False
 
     def _fail(self, message: str):
