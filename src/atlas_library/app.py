@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QAbstractItemView,
-    QTabWidget, QTabBar,
+    QTabWidget, QTabBar, QComboBox, QCheckBox,
 )
 
 from .catalog import Catalog
@@ -103,10 +103,20 @@ class LibraryWindow(QMainWindow):
         header.addWidget(self.scan_btn)
         outer.addLayout(header)
 
+        find_row = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search your sourcebook titles...")
         self.search.textChanged.connect(self._refresh_gallery)
-        outer.addWidget(self.search)
+        find_row.addWidget(self.search, 1)
+        self.view_filter = QComboBox()
+        self.view_filter.addItem("All Books", "all")
+        self.view_filter.addItem("Favorites", "favorites")
+        self.view_filter.addItem("Currently Reading", "reading")
+        self.view_filter.addItem("Finished", "finished")
+        self.view_filter.currentIndexChanged.connect(self._refresh_gallery)
+        self.view_filter.setFixedWidth(175)
+        find_row.addWidget(self.view_filter)
+        outer.addLayout(find_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         outer.addWidget(splitter, 1)
@@ -158,6 +168,17 @@ class LibraryWindow(QMainWindow):
         self.detail_warning = QLabel("")
         self.detail_warning.setFixedHeight(22)
         details.addWidget(self.detail_warning)
+        self.favorite_check = QCheckBox("Favorite")
+        self.favorite_check.setEnabled(False)
+        self.favorite_check.toggled.connect(self._change_favorite)
+        details.addWidget(self.favorite_check)
+        self.reading_state = QComboBox()
+        self.reading_state.addItem("Unread", "unread")
+        self.reading_state.addItem("Currently Reading", "reading")
+        self.reading_state.addItem("Finished", "finished")
+        self.reading_state.setEnabled(False)
+        self.reading_state.currentIndexChanged.connect(self._change_reading_status)
+        details.addWidget(self.reading_state)
         self.copy_path_btn = QPushButton("Copy full file path")
         self.copy_path_btn.setEnabled(False)
         self.copy_path_btn.clicked.connect(self.copy_full_path)
@@ -305,9 +326,15 @@ class LibraryWindow(QMainWindow):
                     continue
             if query and query not in book["title"].casefold() and query not in relative.as_posix().casefold():
                 continue
+            profile = self.catalog.get_profile(book["path"])
+            filter_by = self.view_filter.currentData()
+            if filter_by == "favorites" and not profile["favorite"]:
+                continue
+            if filter_by in ("reading", "finished") and profile["reading_status"] != filter_by:
+                continue
             pix = QPixmap(book["cover_path"]) if book["cover_path"] else QPixmap()
             icon = QIcon(pix) if not pix.isNull() else self._empty_cover
-            item = QListWidgetItem(icon, book["title"])
+            item = QListWidgetItem(icon, ("★ " if profile["favorite"] else "") + book["title"])
             item.setData(Qt.ItemDataRole.UserRole, book["path"])
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter)
             item.setToolTip(str(relative))
@@ -321,6 +348,14 @@ class LibraryWindow(QMainWindow):
             self.open_btn.setEnabled(False)
             self.external_btn.setEnabled(False)
             self.copy_path_btn.setEnabled(False)
+            self.favorite_check.blockSignals(True)
+            self.favorite_check.setChecked(False)
+            self.favorite_check.setEnabled(False)
+            self.favorite_check.blockSignals(False)
+            self.reading_state.blockSignals(True)
+            self.reading_state.setCurrentIndex(0)
+            self.reading_state.setEnabled(False)
+            self.reading_state.blockSignals(False)
             self.detail_warning.setText("")
             self.detail_warning.setToolTip("")
             self.detail_title.setText("")
@@ -342,6 +377,17 @@ class LibraryWindow(QMainWindow):
             )
         )
         self.detail_title.setToolTip(book["title"])
+        profile = self.catalog.get_profile(path)
+        self.favorite_check.blockSignals(True)
+        self.favorite_check.setChecked(profile["favorite"])
+        self.favorite_check.setEnabled(True)
+        self.favorite_check.blockSignals(False)
+        self.reading_state.blockSignals(True)
+        self.reading_state.setCurrentIndex(
+            max(0, self.reading_state.findData(profile["reading_status"]))
+        )
+        self.reading_state.setEnabled(True)
+        self.reading_state.blockSignals(False)
         size_mb = book["size_bytes"] / (1024 * 1024)
         pages = book["page_count"] if book["page_count"] is not None else "Unknown"
         try:
@@ -379,6 +425,21 @@ class LibraryWindow(QMainWindow):
         if self.selected_path:
             QApplication.clipboard().setText(self.selected_path)
 
+    def _change_favorite(self, checked: bool):
+        if not self.selected_path:
+            return
+        self.catalog.set_favorite(self.selected_path, checked)
+        self._refresh_gallery()
+
+    def _change_reading_status(self, _index: int):
+        if not self.selected_path:
+            return
+        status = self.reading_state.currentData()
+        if status is None:
+            return
+        self.catalog.set_reading_status(self.selected_path, status)
+        self._refresh_gallery()
+
     def open_book(self):
         """Open one PDF in an internal tab, without launching another app."""
         if not self.selected_path:
@@ -388,6 +449,13 @@ class LibraryWindow(QMainWindow):
             QMessageBox.warning(self, "Missing file", "The PDF is no longer at its cataloged path.")
             return
         key = str(path)
+        profile = self.catalog.get_profile(key)
+        if profile["reading_status"] == "unread":
+            self.catalog.set_reading_status(key, "reading")
+            self.reading_state.blockSignals(True)
+            self.reading_state.setCurrentIndex(self.reading_state.findData("reading"))
+            self.reading_state.blockSignals(False)
+            self._refresh_gallery()
         existing = self.reader_tabs.get(key)
         if existing is not None:
             self.tabs.setCurrentWidget(existing)
