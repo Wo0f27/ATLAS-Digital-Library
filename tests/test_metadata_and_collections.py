@@ -180,3 +180,85 @@ def test_bookshelf_metadata_and_virtual_filters(tmp_path: Path, monkeypatch):
     assert window.edit_metadata_btn.isEnabled()
     assert window.assign_shelves_btn.isEnabled()
     window.close()
+
+
+
+def test_bookshelf_editing_dialog_workflow_is_non_destructive(tmp_path: Path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    root = tmp_path / "not-present"
+    data = tmp_path / "appstate"
+    book = root / "Book.pdf"
+    catalog = Catalog(data / "catalog.sqlite3")
+    _index(catalog, book, root.resolve())
+    catalog.close()
+
+    window = LibraryWindow(data, root)
+    window.show()
+    app.processEvents()
+    window.gallery.setCurrentItem(window.gallery.item(0))
+    assert window.selected_path == str(book)
+
+    monkeypatch.setattr(
+        MetadataDialog, "exec",
+        lambda self: QDialog.DialogCode.Accepted,
+    )
+    monkeypatch.setattr(
+        MetadataDialog, "values",
+        lambda self: {
+            "display_title": "My Revised Display Title",
+            "authors": "Example Author",
+            "publisher": "Local Publisher",
+            "edition": "2nd printing",
+            "publication_year": 2019,
+            "game_system": "D&D 5e",
+            "description": "Indexable synopsis",
+            "notes": "For private research",
+            "tags": ["Lore", "Bestiary"],
+        },
+    )
+    window._edit_metadata()
+    assert "My Revised Display Title" in window.gallery.item(0).text()
+    assert window.catalog.get(book)["title"] == "Book"  # original still indexed
+
+    monkeypatch.setattr(
+        QInputDialog, "getText",
+        lambda *args, **kwargs: ("Campaign Research", True),
+    )
+    window._create_collection()
+    assert window.collection_list.count() == 1
+    collection_id = window.collection_list.item(0).data(Qt.ItemDataRole.UserRole)
+
+    window.navigation_tabs.setCurrentIndex(0)
+    window.gallery.setCurrentItem(window.gallery.item(0))
+    monkeypatch.setattr(
+        CollectionMembershipDialog, "exec",
+        lambda self: QDialog.DialogCode.Accepted,
+    )
+    monkeypatch.setattr(
+        CollectionMembershipDialog, "selected_ids",
+        lambda self: {collection_id},
+    )
+    window._edit_book_collections()
+    assert window.catalog.get_book_collections(book) == {collection_id}
+
+    window.navigation_tabs.setCurrentIndex(1)
+    assert window.collection_list.currentItem().text() == "Campaign Research"
+    assert window.gallery.count() == 1
+
+    monkeypatch.setattr(
+        QInputDialog, "getText",
+        lambda *args, **kwargs: ("Campaign Research Renamed", True),
+    )
+    window._rename_collection()
+    assert window.collection_list.currentItem().text() == "Campaign Research Renamed"
+
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    window._delete_collection()
+    assert window.collection_list.count() == 0
+    assert window.catalog.get_book_collections(book) == set()
+    assert window.catalog.get_metadata(book)["notes"] == "For private research"
+    assert window.catalog.get_profile(book)["reading_status"] == "unread"
+    window.close()
