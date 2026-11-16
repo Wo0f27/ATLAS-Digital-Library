@@ -14,6 +14,8 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Double-click a book to read it in a tab inside A.T.L.A.S.
 - Embedded reader: previous/next page, page number jump, continuous or single-page mode, fit-to-width/page, custom zoom, PDF table of contents and in-book text search.
 - Last page and viewing preferences saved automatically in the local catalog.
+- Ctrl+mouse-wheel/trackpad scrolling adjusts zoom smoothly; native pinch is supported when Qt and the trackpad driver deliver a zoom gesture.
+- The bookshelf details sidebar stays fixed-width; full file paths are in tooltips and a Copy full file path control.
 - Optional open in the Windows default PDF application.
 - Rescan the library for new, modified, and missing files.
 - Unit tests for catalog persistence and scanning.
