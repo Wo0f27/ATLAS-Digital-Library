@@ -1,6 +1,6 @@
 # A.T.L.A.S. Digital Library: development roadmap
 
-## Milestone 1 — Desktop foundation (current)
+## Milestone 1 — Desktop foundation (validated on Windows)
 
 - [x] Native PySide6 window
 - [x] Browse existing physical folders
@@ -10,11 +10,13 @@
 - [x] Search by book title / filename
 - [x] Safe rescanning and missing-file status
 - [x] Initial automated unit tests
-- [ ] Validate install and launch on the user's Windows machine
+- [x] Validate install, cover display, folder navigation, search, and persistence on user's Windows machine
 
 ## Milestone 2 — Built-in reader and catalog
 
-- PDF reader with page navigation, zoom, table of contents, and position persistence
+- [x] Reader foundation: internal tabs, page navigation, zoom, table of contents, reading position
+- [x] Native continuous/single-page switching and in-book text search (text-layer PDFs)
+- [ ] Validate reader on the user's Windows machine with real sourcebooks
 - Metadata editing, favorites, bookmarks, and reading status
 - Virtual collections and tags independent of physical file paths
 
