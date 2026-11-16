@@ -198,6 +198,7 @@ class LibraryWindow(QMainWindow):
         self.worker = worker
         worker.found.connect(self._on_found)
         worker.completed.connect(self._scan_finished)
+        worker.finished.connect(self._worker_finished)
         worker.start()
 
     def _on_found(self, book):
@@ -209,14 +210,16 @@ class LibraryWindow(QMainWindow):
             self._refresh_gallery()
 
     def _scan_finished(self, count, error):
-        self.worker = None
-        self.scan_btn.setEnabled(True)
-        self.choose_btn.setEnabled(True)
         self._load_existing()
         if error:
             self.status.setText(f"Scan ended after {count} PDFs: {error}")
         else:
             self.status.setText(f"Ready — {len(self.books)} PDFs in {self.root}")
+
+    def _worker_finished(self):
+        self.worker = None
+        self.scan_btn.setEnabled(True)
+        self.choose_btn.setEnabled(True)
 
     def _refresh_folders(self):
         selected = self.active_folder
