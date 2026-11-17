@@ -62,6 +62,21 @@ class FittingPageView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+        )
+
+    def wheelEvent(self, event):
+        """Ctrl+wheel zooms, while ordinary wheel events scroll the page."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            angle = event.angleDelta().y()
+            pixels = event.pixelDelta().y()
+            delta = (angle / 120.0) if angle else (pixels / 120.0)
+            if delta:
+                self.zoom(1.12 ** delta)
+                event.accept()
+                return
+        super().wheelEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
