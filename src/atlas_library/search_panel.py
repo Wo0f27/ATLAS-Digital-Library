@@ -48,6 +48,7 @@ class IndexWorker(QThread):
             "errors": [], "cancelled": False, "ocr_available": False,
             "mixed_checked": 0, "mixed_added": 0,
             "region_checked": 0, "region_candidates": 0, "region_added": 0,
+            "region_failed": 0,
         }
         try:
             index = PageIndex(self.db_path)
@@ -85,6 +86,7 @@ class IndexWorker(QThread):
                     outcome["region_checked"] += report["region_checked"]
                     outcome["region_candidates"] += report["region_candidates"]
                     outcome["region_added"] += report["region_added"]
+                    outcome["region_failed"] += report["region_failed"]
                 except IndexCancelled:
                     outcome["cancelled"] = True
                     break
@@ -432,7 +434,8 @@ class SearchPanel(QWidget):
             f"with new text: {result['mixed_added']}. "
             f"Small-region pages checked: {result['region_checked']}; "
             f"image regions found: {result['region_candidates']}; "
-            f"pages with additional text: {result['region_added']}."
+            f"pages with additional text: {result['region_added']}; "
+            f"OCR failures: {result['region_failed']} (retryable)."
         )
         if not result["ocr_available"] and self.ocr_checkbox.isChecked():
             summary += " Tesseract not found; scanned pages remain pending."
