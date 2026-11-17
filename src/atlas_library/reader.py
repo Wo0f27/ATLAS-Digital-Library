@@ -14,12 +14,13 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
     QTreeView, QVBoxLayout, QWidget, QListWidget, QListWidgetItem,
-    QTabWidget, QInputDialog, QMessageBox, QTextBrowser,
+    QTabWidget, QInputDialog, QMessageBox, QTextBrowser, QStackedWidget,
 )
 
 from .catalog import Catalog
 from .search_context import format_excerpt_html, source_label
 from .ocr_preview import OcrPositionDialog
+from .inline_ocr import InlineOcrPage
 
 
 def clamp_page(page: int, page_count: int) -> int:
@@ -200,6 +201,14 @@ class PdfReader(QWidget):
         self.locate_ocr_button.clicked.connect(self._locate_ocr_match)
         self.locate_ocr_button.hide()
         controls.addWidget(self.locate_ocr_button)
+        self.inline_ocr_button = QPushButton("Highlight in reader")
+        self.inline_ocr_button.setToolTip(
+            "Switch this reader to an OCR-highlighted page image. "
+            "Return to PDF restores the original continuous-scroll view."
+        )
+        self.inline_ocr_button.clicked.connect(self._show_inline_ocr)
+        self.inline_ocr_button.hide()
+        controls.addWidget(self.inline_ocr_button)
         self.match_close = QPushButton("Dismiss")
         self.match_close.clicked.connect(self.clear_search_matches)
         controls.addWidget(self.match_close)
@@ -237,7 +246,12 @@ class PdfReader(QWidget):
         bookmarks_layout.addLayout(bookmark_buttons)
         self.side_tabs.addTab(bookmarks_widget, "My Bookmarks")
         splitter.addWidget(self.side_tabs)
-        splitter.addWidget(self.view)
+        self.reader_stack = QStackedWidget(self)
+        self.reader_stack.addWidget(self.view)
+        self.inline_page = InlineOcrPage(self)
+        self.inline_page.backRequested.connect(self._leave_inline_ocr)
+        self.reader_stack.addWidget(self.inline_page)
+        splitter.addWidget(self.reader_stack)
         splitter.setSizes([220, 900])
         outer.addWidget(splitter, 1)
 
@@ -259,6 +273,7 @@ class PdfReader(QWidget):
     def _show_indexed_match(self, position: int):
         if not self._indexed_matches:
             return
+        self._leave_inline_ocr()
         self._indexed_match_position = position
         row = self._indexed_matches[position]
         page_index = max(0, int(row["page_index"]))
@@ -274,14 +289,43 @@ class PdfReader(QWidget):
         )
         self.match_previous.setEnabled(position > 0)
         self.match_next.setEnabled(position < len(self._indexed_matches) - 1)
-        self.locate_ocr_button.setVisible(
+        is_ocr = (
             row.get("source") in ("ocr", "mixed")
             and self.search_db_path is not None
         )
+        self.locate_ocr_button.setVisible(is_ocr)
+        self.inline_ocr_button.setVisible(is_ocr)
         if self._loaded:
             self.goto_page(page_index)
         else:
             self._saved["page_index"] = page_index
+
+    def _show_inline_ocr(self):
+        if self.search_db_path is None or not self._indexed_matches:
+            return
+        row = self._indexed_matches[self._indexed_match_position]
+        if row.get("source") not in ("ocr", "mixed"):
+            return
+        settings = QSettings("ATLAS", "DigitalLibrary")
+        self.reader_stack.setCurrentWidget(self.inline_page)
+        # Native viewer remains mounted and keeps its scroll and zoom state.
+        for control in (self.zoom_out, self.zoom_in, self.zoom_mode, self.page_mode):
+            control.setEnabled(False)
+        self.inline_page.activate(
+            self.search_db_path, self.path, int(row["page_index"]),
+            str(row.get("excerpt") or ""),
+            str(settings.value("ocr_language", "eng")),
+            str(settings.value("tesseract_path", "")),
+        )
+
+    def _leave_inline_ocr(self):
+        if not hasattr(self, "reader_stack"):
+            return
+        if self.reader_stack.currentWidget() is self.inline_page:
+            self.inline_page.deactivate()
+            self.reader_stack.setCurrentWidget(self.view)
+            for control in (self.zoom_out, self.zoom_in, self.zoom_mode, self.page_mode):
+                control.setEnabled(True)
 
     def _locate_ocr_match(self):
         if self.search_db_path is None or not self._indexed_matches:
@@ -315,10 +359,12 @@ class PdfReader(QWidget):
             self._show_indexed_match(candidate)
 
     def clear_search_matches(self):
+        self._leave_inline_ocr()
         self._indexed_matches = []
         self._indexed_match_position = -1
         self.match_context.hide()
         self.locate_ocr_button.hide()
+        self.inline_ocr_button.hide()
         self.match_excerpt.clear()
 
     def _on_document_status(self, status):
@@ -367,6 +413,7 @@ class PdfReader(QWidget):
     def goto_page(self, page: int):
         if not self._loaded or self.document.pageCount() < 1:
             return
+        self._leave_inline_ocr()
         number = clamp_page(page, self.document.pageCount())
         self.navigator.jump(number, QPointF(0, 0))
         self._page_changed(number)
@@ -624,6 +671,7 @@ class PdfReader(QWidget):
         )
 
     def dispose(self):
+        self.inline_page.shutdown()
         if self._ocr_preview is not None:
             self._ocr_preview.close()
             self._ocr_preview = None
