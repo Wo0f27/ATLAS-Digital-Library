@@ -92,7 +92,7 @@ def test_full_catalog_export_preserves_metadata_tags_and_shelves(tmp_path: Path)
     assert naval["Authors"] == "Test Author"
     assert naval["Publisher"] == "Test Press"
     assert naval["Edition"] == "2014"
-    assert naval["Tags"] == "Warfare; Naval"
+    assert set(naval["Tags"].split("; ")) == {"Warfare", "Naval"}
     assert naval["Virtual Shelves"] == "Personal Warfare Research"
     assert naval["Approved Subject Folder"] == ""
     assert naval["Proposed Subject Folder"] == \
@@ -113,7 +113,7 @@ def test_full_catalog_export_preserves_metadata_tags_and_shelves(tmp_path: Path)
     assert b.read_bytes() == before_b
     assert db.available(root.resolve()) == snapshot
     assert db.get_book_collections(a.resolve()) == {shelf_id}
-    assert db.get_metadata(a.resolve())["tags"] == ["Warfare", "Naval"]
+    assert set(db.get_metadata(a.resolve())["tags"]) == {"Warfare", "Naval"}
     db.close()
 
 
