@@ -44,9 +44,12 @@
 - [x] Validate fuzzy/regex and metadata filters on user's Windows machine
 - [ ] Expand approximate multi-word queries and additional search refinements
 - [x] Show OCR-origin labels and highlighted excerpts in reader search-context panel
-- [ ] Accurate on-page OCR highlighting (requires word coordinates)
+- [x] On-demand Tesseract TSV OCR word-position extraction, local cache and page preview
+- [ ] Verify word-position previews with the user's real scanned books
+- [ ] Integrate word-coordinate overlays directly into the Qt PDF viewport (future refinement)
 - [x] Read-only local search-index benchmark button and per-query timings
-- [ ] Run benchmark and check index size on the user's large collection
+- [x] Validate benchmark control and report display on user's Windows installation
+- [ ] Inspect real benchmark measurements and check index size on the user's large collection
 
 ## Milestone 4 — Organization and personalization
 
