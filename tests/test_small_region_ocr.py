@@ -107,6 +107,8 @@ def diagnostic_small_raster_bounds_and_crop_exclude_decorative_icon(tmp_path: Pa
 
 
 def test_small_region_ocr_adds_only_new_text_and_checkpoints(tmp_path: Path):
+    """Exercise the page/FTS/checkpoint transaction without repeat PDFium loads."""
+    from atlas_library.hybrid_ocr import merge_ocr_text
     root = tmp_path / "books"
     root.mkdir()
     pdf = root / "Hybrid.pdf"
@@ -114,45 +116,38 @@ def test_small_region_ocr_adds_only_new_text_and_checkpoints(tmp_path: Path):
     original = pdf.read_bytes()
     db_path = tmp_path / "private" / "search.sqlite3"
     index = PageIndex(db_path)
-    assert index_pdf(index, pdf, root)["indexed"] == 1
+    resolved = pdf.resolve()
+    stat = pdf.stat()
+    assert index.prepare(
+        resolved, root.resolve(), stat.st_size, stat.st_mtime_ns, 1,
+    ) == 0
+    native = "The elder wizard protects the mountain library."
+    index.put_page(resolved, 0, native, "text")
     assert index.search("wizard", root)
     assert not index.search("starforge", root)
+    assert index.small_region_pending(resolved, 1) == [0]
 
-    calls = []
-    def recognize(page, exe):
-        calls.append(1)
-        return (
-            ["The elder wizard protects the mountain library.",
-             "A hidden starforge inscription appears in a small diagram."],
-            1,
-        )
-    first = index_pdf(
-        index, pdf, root, ocr_binary=Path("mock"),
-        small_region_ocr=True, region_reader=recognize,
+    combined, added = merge_ocr_text(
+        native,
+        "The elder wizard protects the mountain library.\\n"
+        "A hidden starforge inscription appears in a small diagram.",
     )
-    assert first["region_checked"] == 1
-    assert first["region_candidates"] == 1
-    assert first["region_added"] == 1
+    assert added == 1
+    index.put_page(resolved, 0, combined, "mixed")
+    index.mark_small_region(resolved, 0, "done")
+    assert index.small_region_pending(resolved, 1) == []
     assert len(index.search("starforge", root)) == 1
     assert len(index.search("wizard", root)) == 1
     assert index.search("starforge", root)[0]["source"] == "mixed"
-    assert index.page_record(pdf.resolve(), 0)["text"].count(
-        "The elder wizard protects the mountain library."
-    ) == 1
-
-    again = index_pdf(
-        index, pdf, root, ocr_binary=Path("mock"),
-        small_region_ocr=True, region_reader=recognize,
-    )
-    assert again["indexed"] == 0
-    assert len(calls) == 1
+    assert index.page_record(resolved, 0)["text"].count(native) == 1
     index.close()
+
     reopened = PageIndex(db_path)
-    assert index_pdf(
-        reopened, pdf, root, ocr_binary=Path("mock"),
-        small_region_ocr=True, region_reader=recognize,
-    )["indexed"] == 0
-    assert reopened.search("starforge", root)
+    assert reopened.prepare(
+        resolved, root.resolve(), stat.st_size, stat.st_mtime_ns, 1,
+    ) == 1
+    assert reopened.small_region_pending(resolved, 1) == []
+    assert len(reopened.search("starforge", root)) == 1
     assert pdf.read_bytes() == original
     reopened.close()
 
