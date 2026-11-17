@@ -37,7 +37,8 @@
 - [x] Opt-in OCR pass for text-rich pages containing substantial raster images
 - [x] Preserve native text and avoid exact repeated lines when combining OCR results
 - [x] Validate mixed-content OCR on a real book using the single-book scope
-- [ ] Improve image-region-only OCR detection for smaller embedded illustrations
+- [x] Optional small-raster-region OCR with independent resumable checkpoints
+- [ ] Validate small-region OCR against actual mixed-content sourcebook pages
 - [x] Initial fuzzy single-word and bounded regex search modes
 - [x] Search metadata, tag and shelf filters applied before result limiting
 - [x] FTS5 supports Boolean and NEAR proximity queries
@@ -47,7 +48,7 @@
 - [x] On-demand Tesseract TSV OCR word-position extraction, local cache and page preview
 - [x] Verify word-position previews with the user's real scanned books
 - [x] Add in-reader OCR-highlight page mode with return to unmodified native PDF view
-- [ ] Verify inline OCR-highlight mode on the user's Windows installation
+- [x] Verify inline OCR-highlight mode on the user's Windows installation
 - [ ] Native QPdfView continuous-scroll coordinate overlays (requires reliable page geometry mapping)
 - [x] Read-only local search-index benchmark button and per-query timings
 - [x] Validate benchmark control and report display on user's Windows installation
