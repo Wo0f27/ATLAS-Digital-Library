@@ -27,6 +27,7 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Source-aware search results and an embedded reader excerpt panel for text/OCR matches, with previous/next result navigation.
 - **Benchmark Index** shows local indexed document/page counts, search index size and sample query timings.
 - OCR result page-location previews with local, cached Tesseract TSV word bounding boxes and zoomable highlights.
+- **Highlight in reader** for OCR hits: a temporary in-reader, zoomable page-rendering mode with OCR word highlights; **Return to PDF** restores the original native view and reading position.
 - Ctrl+mouse-wheel/trackpad scrolling adjusts zoom smoothly; native pinch is supported when Qt and the trackpad driver deliver a zoom gesture.
 - The bookshelf details sidebar stays fixed-width; full file paths are in tooltips and a Copy full file path control.
 - Optional open in the Windows default PDF application.
@@ -87,7 +88,7 @@ Search options:
   "dragon AND ancient", '"legendary actions"', '"green dragon" OR "blue dragon"',
   and "NEAR(dragon treasure, 6)".
 
-Double-click a result to open the **specific page inside A.T.L.A.S.** The reader shows the source of indexed text (selectable PDF, offline OCR, or mixed), highlights matching words in a separate excerpt panel and provides Previous/Next result controls. On OCR or mixed results, **Locate OCR words** opens an additional zoomable page preview with Tesseract word boxes, where matching OCR words can be identified. This preview does not annotate or change the built-in PDF view. Only books
+Double-click a result to open the **specific page inside A.T.L.A.S.** The reader shows the source of indexed text (selectable PDF, offline OCR, or mixed), highlights matching words in a separate excerpt panel and provides Previous/Next result controls. On OCR or mixed results, **Locate OCR words** opens an additional zoomable page preview with Tesseract word boxes, where matching OCR words can be identified. This preview does not annotate or change the built-in PDF view. The optional **Highlight in reader** action displays the same OCR-highlighted page *within* the reader, and **Return to PDF** resumes the regular continuous-scroll PDF viewer without changing its zoom and page settings. Only books
 in the active catalog root are displayed. You can combine full-text searches
 with **tag**, **virtual shelf**, and **author/publisher/edition/system**
 filters. Filter matching happens before limiting results to the top 150.
@@ -167,6 +168,21 @@ preview**, not an overlay directly on Qt's scrollable PDF reader canvas.
 
 This remains local/offline, does not rebuild your existing OCR index, and
 does not edit the original document.
+
+### Inline OCR highlighting in the reader
+
+After opening an OCR or mixed-content search result, choose **Highlight in
+reader**. The current PDF page is displayed with recognized-word overlays in
+the same reading area as the native viewer; use Zoom +, Zoom -, Ctrl+scroll,
+or Fit page to inspect it. Choose **Return to PDF** to restore the original
+Qt PDF viewer with its existing reading position and zoom mode.
+
+This is a *temporary image-based page mode*, not an overlay on Qt's native
+continuous-scroll QPdfView, whose internal page geometry is not publicly
+exposed. Regular page navigation or selecting a different search result
+returns to the normal PDF view. No extra OCR work is required if valid cached
+word boxes already exist. Nothing is written to the source PDFs or the
+existing full-text index.
 
 The search index is a separate SQLite database in the Windows per-user app-data
 directory. It contains extracted or OCR-recognized book text **only on your
