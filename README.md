@@ -2,7 +2,7 @@
 
 A native, offline-first Windows digital bookshelf for your personal document collection.
 
-**Development status:** Milestone 3 early build (page-level full-text index, initial offline OCR support). The full DocGoblin-style search suite and standalone Windows executable are not finished.
+**Development status:** Milestone 3 in development (page-level search, initial OCR and opt-in mixed-page OCR). The complete DocGoblin-style search suite and standalone Windows executable are not finished.
 
 ## Currently implemented
 
@@ -23,6 +23,7 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Full-Text Search tab: background indexing, page-linked search results, exact phrases, all-words matching, and advanced SQLite FTS5 expressions.
 - Optional offline Tesseract OCR for image-only or nearly textless pages; OCR text is stored in the local search index.
 - Resumable indexing: unchanged files are skipped and interrupted PDFs continue at the last committed page.
+- Optional **Inspect mixed text/image pages** setting for OCR on otherwise text-readable pages containing large raster regions, with a single-book index scope for safe testing.
 - Ctrl+mouse-wheel/trackpad scrolling adjusts zoom smoothly; native pinch is supported when Qt and the trackpad driver deliver a zoom gesture.
 - The bookshelf details sidebar stays fixed-width; full file paths are in tooltips and a Copy full file path control.
 - Optional open in the Windows default PDF application.
@@ -103,9 +104,32 @@ textless pages as **Awaiting OCR**. After installing Tesseract, run
 **Index / Update Library** again; only pending OCR pages of unchanged files
 need reprocessing. Page images are temporary and cleaned after OCR.
 
+### Mixed text/image page OCR (opt-in)
+
+The ordinary OCR setting automatically handles pages with no meaningful PDF
+text. For pages with **both selectable PDF text and a large embedded raster image**,
+tick **Inspect mixed text/image pages (slower, optional)** before indexing.
+
+For a first test, choose a specific book under **Index scope** rather than
+**All library books**. This detects PDF image objects covering at least about
+10% of a page, rasterizes qualifying pages for offline Tesseract OCR, and
+appends additional recognized lines to the existing extracted text. Normalized
+lines already present in the original PDF text are skipped to reduce duplicates.
+
+The first opt-in run may examine previously indexed pages of that book; later
+runs skip completed checks on unchanged files. Pages where OCR fails remain
+eligible for retry. The results remain in the existing local search index,
+and you can search them immediately. The user source PDF is never edited.
+
+A large illustration **does not guarantee that any text is present**. This
+is a conservative, opt-in candidate heuristic, not precise image-region
+segmentation. Processing fully illustrated books may take considerable time.
+OCR-derived text is searchable in the library-wide Search tab, but not yet
+selectable or visually highlighted inside the PDF view.
+
 Current limitations:
-- OCR currently targets pages with empty or very short extractable text, not
-  every image embedded in an otherwise text-rich page.
+- Mixed-page OCR uses a large-image heuristic, not image-only region cropping.
+  Small scanned text blocks below the threshold may still be missed.
 - OCR quality depends on scan resolution, language, and unusual page layouts.
 - Fuzzy search currently supports one Latin-alphabet word and is bounded by
   vocabulary size; it cannot recognize every misspelling or search phrases.
