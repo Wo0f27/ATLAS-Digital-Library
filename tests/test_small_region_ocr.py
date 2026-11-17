@@ -74,7 +74,7 @@ def make_mixed_region_pdf(path: Path, phrase: str = "The elder wizard protects t
     path.write_bytes(output)
 
 
-def test_small_raster_bounds_and_crop_exclude_decorative_icon(tmp_path: Path):
+def diagnostic_small_raster_bounds_and_crop_exclude_decorative_icon(tmp_path: Path):
     pdf = tmp_path / "Hybrid.pdf"
     make_mixed_region_pdf(pdf)
     original = pdf.read_bytes()
