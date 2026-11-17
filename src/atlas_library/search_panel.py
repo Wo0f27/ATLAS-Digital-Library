@@ -10,11 +10,14 @@ from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QPlainTextEdit,
 )
 
 from .fulltext import IndexCancelled, PageIndex, index_pdf, read_ocr, resolve_tesseract
 from .advanced_search import AdvancedSearcher
 from .catalog import Catalog
+from .benchmark import benchmark_index, format_benchmark
+from .search_context import context_for_book, source_label
 
 
 class IndexWorker(QThread):
@@ -124,12 +127,33 @@ class SearchWorker(QThread):
                 index.close()
 
 
+class BenchmarkWorker(QThread):
+    completed = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, db_path: Path, root: Path):
+        super().__init__()
+        self.db_path = Path(db_path)
+        self.root = Path(root)
+
+    def run(self):
+        index = None
+        try:
+            index = PageIndex(self.db_path)
+            self.completed.emit(benchmark_index(index, self.root))
+        except Exception as exc:
+            self.failed.emit(f"Benchmark failed: {exc}")
+        finally:
+            if index is not None:
+                index.close()
+
+
 class SearchPanel(QWidget):
     def __init__(
         self, db_path: Path,
         root_getter: Callable[[], Path],
         books_getter: Callable[[], dict],
-        open_result: Callable[[str, int], None],
+        open_result: Callable[[str, int, list[dict], int], None],
         parent: QWidget | None = None,
         catalog_getter: Callable[[], Catalog] | None = None,
     ):
@@ -141,6 +165,7 @@ class SearchPanel(QWidget):
         self.catalog_getter = catalog_getter
         self.worker: IndexWorker | None = None
         self.search_worker: SearchWorker | None = None
+        self.benchmark_worker: BenchmarkWorker | None = None
         self.settings = QSettings("ATLAS", "DigitalLibrary")
         self._build_ui()
         self.refresh_status()
@@ -203,6 +228,12 @@ class SearchPanel(QWidget):
         self.stop_btn.clicked.connect(self.stop_index)
         self.stop_btn.setEnabled(False)
         index_row.addWidget(self.stop_btn)
+        self.benchmark_btn = QPushButton("Benchmark Index")
+        self.benchmark_btn.setToolTip(
+            "Measure local indexed page counts, index size and sample query latency"
+        )
+        self.benchmark_btn.clicked.connect(self.run_benchmark)
+        index_row.addWidget(self.benchmark_btn)
         self.ocr_checkbox = QCheckBox("OCR scanned pages")
         self.ocr_checkbox.setChecked(True)
         index_row.addWidget(self.ocr_checkbox)
@@ -250,6 +281,16 @@ class SearchPanel(QWidget):
         self.results.setWordWrap(True)
         self.results.itemDoubleClicked.connect(self._open_match)
         outer.addWidget(self.results, 1)
+
+        self.benchmark_report = QPlainTextEdit()
+        self.benchmark_report.setReadOnly(True)
+        self.benchmark_report.setMaximumHeight(190)
+        self.benchmark_report.setToolTip(
+            "Local benchmark results. Select text to copy the measurements."
+        )
+        self.benchmark_report.hide()
+        outer.addWidget(self.benchmark_report)
+
         self.result_status = QLabel(
             "Search indexes are stored locally. No files are uploaded or modified."
         )
@@ -317,6 +358,7 @@ class SearchPanel(QWidget):
         self.stop_btn.setEnabled(True)
         self.ocr_select_btn.setEnabled(False)
         self.ocr_checkbox.setEnabled(False)
+        self.benchmark_btn.setEnabled(False)
         self.mixed_checkbox.setEnabled(False)
         self.index_scope.setEnabled(False)
         self.language.setEnabled(False)
@@ -369,6 +411,7 @@ class SearchPanel(QWidget):
         self.stop_btn.setEnabled(False)
         self.ocr_select_btn.setEnabled(True)
         self.ocr_checkbox.setEnabled(True)
+        self.benchmark_btn.setEnabled(self.benchmark_worker is None)
         self.mixed_checkbox.setEnabled(True)
         self.index_scope.setEnabled(True)
         self.language.setEnabled(True)
@@ -446,6 +489,29 @@ class SearchPanel(QWidget):
             }
         return selected
 
+    def run_benchmark(self):
+        if self.benchmark_worker is not None or self.worker is not None:
+            return
+        self.benchmark_btn.setEnabled(False)
+        self.benchmark_report.show()
+        self.benchmark_report.setPlainText("Measuring local search index...")
+        job = BenchmarkWorker(self.index.path, self.root_getter())
+        self.benchmark_worker = job
+        job.completed.connect(
+            lambda result: self.benchmark_report.setPlainText(
+                format_benchmark(result)
+            )
+        )
+        job.failed.connect(
+            lambda message: self.benchmark_report.setPlainText(message)
+        )
+        job.finished.connect(self._benchmark_finished)
+        job.start()
+
+    def _benchmark_finished(self):
+        self.benchmark_worker = None
+        self.benchmark_btn.setEnabled(self.worker is None)
+
     def search(self):
         if self.search_worker is not None:
             return
@@ -496,7 +562,11 @@ class SearchPanel(QWidget):
             excerpt = snippet.replace("\r", " ").replace("\n", " ")
             if len(excerpt) > 310:
                 excerpt = excerpt[:307] + "…"
-            label = f"{display}  •  Page {result['page_index'] + 1}\n{excerpt}"
+            origin = source_label(str(result.get("source") or "text"))
+            label = (
+                f"{display}  •  Page {result['page_index'] + 1}"
+                f"  •  {origin}\n{excerpt}"
+            )
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, result)
             item.setToolTip(result["path"])
@@ -512,9 +582,24 @@ class SearchPanel(QWidget):
     def _open_match(self, item: QListWidgetItem):
         result = item.data(Qt.ItemDataRole.UserRole)
         if result and result["path"] in self.books_getter():
-            self.open_result(result["path"], result["page_index"])
+            rows = [
+                self.results.item(index).data(Qt.ItemDataRole.UserRole)
+                for index in range(self.results.count())
+            ]
+            matches = context_for_book(rows, result["path"])
+            selected = next(
+                (index for index, row in enumerate(matches)
+                 if row["page_index"] == result["page_index"]
+                 and row["excerpt"] == result.get("excerpt")),
+                0,
+            )
+            self.open_result(
+                result["path"], result["page_index"], matches, selected
+            )
 
     def shutdown(self):
+        if self.benchmark_worker:
+            self.benchmark_worker.wait()
         if self.search_worker:
             self.search_worker.requestInterruption()
             self.search_worker.wait()
