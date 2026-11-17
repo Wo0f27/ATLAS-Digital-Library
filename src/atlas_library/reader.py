@@ -14,10 +14,11 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter,
     QTreeView, QVBoxLayout, QWidget, QListWidget, QListWidgetItem,
-    QTabWidget, QInputDialog, QMessageBox,
+    QTabWidget, QInputDialog, QMessageBox, QTextBrowser,
 )
 
 from .catalog import Catalog
+from .search_context import format_excerpt_html, source_label
 
 
 def clamp_page(page: int, page_count: int) -> int:
@@ -40,6 +41,8 @@ class PdfReader(QWidget):
         self._loaded = False
         self._restoring = True
         self._match_index = -1
+        self._indexed_matches: list[dict] = []
+        self._indexed_match_position = -1
         self._saved = catalog.get_reader_state(self.path) or {}
         if start_page is not None:
             self._saved["page_index"] = max(0, int(start_page))
@@ -170,6 +173,40 @@ class PdfReader(QWidget):
         findbar.addWidget(self.match_count)
         outer.addLayout(findbar)
 
+        # OCR text is held in the local search index. Without OCR word
+        # coordinates we can highlight its excerpt here, but not place a
+        # misleading rectangle on the scanned page image itself.
+        self.match_context = QWidget(self)
+        match_layout = QVBoxLayout(self.match_context)
+        match_layout.setContentsMargins(5, 4, 5, 4)
+        controls = QHBoxLayout()
+        self.match_heading = QLabel("")
+        controls.addWidget(self.match_heading, 1)
+        self.match_previous = QPushButton("Previous result")
+        self.match_previous.clicked.connect(lambda: self._navigate_indexed_match(-1))
+        controls.addWidget(self.match_previous)
+        self.match_next = QPushButton("Next result")
+        self.match_next.clicked.connect(lambda: self._navigate_indexed_match(1))
+        controls.addWidget(self.match_next)
+        self.match_close = QPushButton("Dismiss")
+        self.match_close.clicked.connect(self.clear_search_matches)
+        controls.addWidget(self.match_close)
+        match_layout.addLayout(controls)
+
+        self.match_excerpt = QTextBrowser(self)
+        self.match_excerpt.setReadOnly(True)
+        self.match_excerpt.setMaximumHeight(85)
+        self.match_excerpt.setOpenExternalLinks(False)
+        match_layout.addWidget(self.match_excerpt)
+        self.match_note = QLabel(
+            "The excerpt is highlighted in the local index. For OCR text, "
+            "its exact position within the PDF image is not yet available."
+        )
+        self.match_note.setWordWrap(True)
+        match_layout.addWidget(self.match_note)
+        self.match_context.hide()
+        outer.addWidget(self.match_context)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.side_tabs = QTabWidget()
         self.side_tabs.addTab(self.toc, "Contents")
@@ -194,6 +231,52 @@ class PdfReader(QWidget):
 
         self.message = QLabel("")
         outer.addWidget(self.message)
+
+    def set_search_matches(self, matches: list[dict], selected_index: int = 0):
+        """Display indexed search context, including OCR-only text, in this tab."""
+        self._indexed_matches = [
+            row for row in matches
+            if row.get("path") == str(self.path)
+        ][:150]
+        if not self._indexed_matches:
+            self.clear_search_matches()
+            return
+        self.match_context.show()
+        self._show_indexed_match(max(0, min(selected_index, len(self._indexed_matches) - 1)))
+
+    def _show_indexed_match(self, position: int):
+        if not self._indexed_matches:
+            return
+        self._indexed_match_position = position
+        row = self._indexed_matches[position]
+        page_index = max(0, int(row["page_index"]))
+        source = source_label(str(row.get("source") or "text"))
+        self.match_heading.setText(
+            f"Indexed result {position + 1} of {len(self._indexed_matches)}"
+            f"  •  Page {page_index + 1}  •  {source}"
+        )
+        self.match_excerpt.setHtml(
+            '<div style="color:#eee6d5;">'
+            + format_excerpt_html(str(row.get("excerpt") or ""))
+            + '</div>'
+        )
+        self.match_previous.setEnabled(position > 0)
+        self.match_next.setEnabled(position < len(self._indexed_matches) - 1)
+        if self._loaded:
+            self.goto_page(page_index)
+        else:
+            self._saved["page_index"] = page_index
+
+    def _navigate_indexed_match(self, direction: int):
+        candidate = self._indexed_match_position + direction
+        if 0 <= candidate < len(self._indexed_matches):
+            self._show_indexed_match(candidate)
+
+    def clear_search_matches(self):
+        self._indexed_matches = []
+        self._indexed_match_position = -1
+        self.match_context.hide()
+        self.match_excerpt.clear()
 
     def _on_document_status(self, status):
         if status == QPdfDocument.Status.Ready:
