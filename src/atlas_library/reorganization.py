@@ -58,6 +58,15 @@ class Rule:
 # Prefer subject-specific phrases to broad keywords. These are explicitly
 # title-based suggestions and cannot substitute for reviewing each book.
 RULES = (
+    Rule("04 World Atlas/Cultures, Factions & Lore",
+         r"\bkobold guide to worldbuilding\b",
+         "Worldbuilding guide indicated in title"),
+    Rule("03 Bestiary/Monsters & Dragons",
+         r"\bkobold guide to monsters\b",
+         "Creature reference indicated in title"),
+    Rule("02 Arcane Collection/Spells & Spellcraft",
+         r"\bkobold guide to magic\b",
+         "Magic-focused reference indicated in title"),
     Rule("07 Reference Desk/Sheets & Play Aids",
          r"\b(character sheets?|pregenerated characters?|gm screen|"
          r"quick reference|play aids?|reference sheets?|fillable)\b",
