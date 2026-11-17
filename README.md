@@ -13,6 +13,7 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Search by filename/title and browse by existing physical folders.
 - Choose **Root folder first** in the bookshelf sort menu to prioritize PDFs directly inside the selected library folder, with titles alphabetized within each group.
 - Use **Folders → All Books → Library root (PDFs only)** to view only those top-level PDFs, excluding nested subfolders.
+- Export a **Plan Folders** CSV of the current catalog with proposed subject classification, metadata, virtual shelf memberships and review flags; the export never moves PDFs.
 - Double-click a book to read it in a tab inside A.T.L.A.S.
 - Embedded reader: previous/next page, page number jump, continuous or single-page mode, fit-to-width/page, custom zoom, PDF table of contents and in-book text search.
 - Last page and viewing preferences saved automatically in the local catalog.
@@ -83,6 +84,45 @@ To see **only** PDFs placed directly in the root, select
 **Folders → All Books → Library root (PDFs only)**. Select **All Books**
 to restore the complete library. Both controls affect presentation only;
 they never relocate, rename or modify PDFs.
+
+## Safe physical-library reorganization (preview only)
+
+The new **Plan Folders** control on the Bookshelf creates a review-only
+CSV covering all PDF records currently marked *available* in the selected
+library. Allow any active Rescan operation to finish first, then click
+**Plan Folders** and save the file (preferably under Documents, outside the
+physical sourcebook collection).
+
+The classification system uses two subject-folder levels: Accession Desk,
+Rulebook Stacks, Arcane Collection, Bestiary, World Atlas, Adventure Archives,
+Campaign Systems, and Reference Desk. It classifies by **book topic**, not
+publisher, author, series, or official/third-party status. Tags, metadata
+and virtual shelves continue to handle these cross-cutting dimensions.
+
+The CSV includes current source paths, title, bibliographic metadata, tags,
+virtual shelves, a **proposed subject folder**, a proposed relative filename,
+confidence, alternate possible subjects, and flags for obvious missing files,
+changed files and duplicate destination names.
+
+**Every proposed row is marked PENDING**, and the Approved Subject Folder is
+blank. Some suggestions are inferred only from filenames or older subject
+folders, not from page contents. Check every proposal and choose a final
+subject; unresolved documents may remain under **Accession Desk / Awaiting
+Classification**. Book contents and publisher/series metadata may inform a
+human review, but the automated rules are only starting suggestions.
+
+**No files, catalog paths, metadata, bookmarks, reader positions, or OCR
+records are changed by this export.** No directories are created in the
+library. Do not bulk-move PDFs in Windows Explorer before a separate, verified
+relocation workflow has been developed and the inventory reviewed. The
+relocation phase will require a database backup, source/destination
+validation, conflict resolution, and coordinated path updates across all
+SQLite tables and caches; this feature does *not* perform those operations.
+
+The exported CSV contains local file paths and bibliographic fields, but not
+PDF contents or private research notes. Review it before sharing it with
+anyone. The output uses UTF-8 with a BOM so Excel can display accented
+filenames and fantasy-book titles correctly.
 
 ## Full-text indexing and offline OCR
 
