@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from .fulltext import IndexCancelled, PageIndex, index_pdf, read_ocr, resolve_tesseract
+from .advanced_search import AdvancedSearcher
+from .catalog import Catalog
 
 
 class IndexWorker(QThread):
@@ -78,6 +80,44 @@ class IndexWorker(QThread):
             self.completed.emit(outcome)
 
 
+class SearchWorker(QThread):
+    """Potentially expensive fuzzy/regex matching must not block the reader."""
+    completed = Signal(list, str)
+    failed = Signal(str)
+
+    def __init__(self, db_path, query, mode, root, allowed_paths):
+        super().__init__()
+        self.db_path = db_path
+        self.query = query
+        self.mode = mode
+        self.root = root
+        self.allowed_paths = allowed_paths
+
+    def run(self):
+        index = None
+        try:
+            index = PageIndex(self.db_path)
+            searcher = AdvancedSearcher(index)
+            if self.mode == "fuzzy":
+                rows, notice = searcher.fuzzy(
+                    self.query, self.root, allowed_paths=self.allowed_paths
+                )
+            else:
+                rows, notice = searcher.regex_search(
+                    self.query, self.root, allowed_paths=self.allowed_paths,
+                    cancel=self.isInterruptionRequested,
+                )
+            if not self.isInterruptionRequested():
+                self.completed.emit(rows, notice)
+        except IndexCancelled:
+            return
+        except Exception as exc:
+            self.failed.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            if index is not None:
+                index.close()
+
+
 class SearchPanel(QWidget):
     def __init__(
         self, db_path: Path,
@@ -85,13 +125,16 @@ class SearchPanel(QWidget):
         books_getter: Callable[[], dict],
         open_result: Callable[[str, int], None],
         parent: QWidget | None = None,
+        catalog_getter: Callable[[], Catalog] | None = None,
     ):
         super().__init__(parent)
         self.index = PageIndex(db_path)
         self.root_getter = root_getter
         self.books_getter = books_getter
         self.open_result = open_result
+        self.catalog_getter = catalog_getter
         self.worker: IndexWorker | None = None
+        self.search_worker: SearchWorker | None = None
         self.settings = QSettings("ATLAS", "DigitalLibrary")
         self._build_ui()
         self.refresh_status()
@@ -117,6 +160,8 @@ class SearchPanel(QWidget):
         self.mode.addItem("All words", "words")
         self.mode.addItem("Exact phrase", "phrase")
         self.mode.addItem("Boolean / FTS5", "advanced")
+        self.mode.addItem("Fuzzy word", "fuzzy")
+        self.mode.addItem("Regular expression", "regex")
         self.mode.setToolTip(
             'Advanced examples: dragon AND ancient; "legendary actions"; '
             '"green dragon" OR "blue dragon"; NEAR(dragon treasure, 6)'
@@ -126,6 +171,23 @@ class SearchPanel(QWidget):
         self.search_btn.clicked.connect(self.search)
         search_row.addWidget(self.search_btn)
         outer.addLayout(search_row)
+
+        facets_row = QHBoxLayout()
+        self.tag_filter = QComboBox()
+        self.tag_filter.setToolTip("Limit results to books with a particular tag")
+        self.tag_filter.addItem("Any tag", None)
+        facets_row.addWidget(self.tag_filter)
+        self.shelf_filter = QComboBox()
+        self.shelf_filter.setToolTip("Limit results to a virtual shelf")
+        self.shelf_filter.addItem("Any shelf", None)
+        facets_row.addWidget(self.shelf_filter)
+        self.meta_filter = QLineEdit()
+        self.meta_filter.setPlaceholderText("Filter author, publisher, edition or system...")
+        facets_row.addWidget(self.meta_filter, 1)
+        self.refresh_filters_button = QPushButton("Refresh filters")
+        self.refresh_filters_button.clicked.connect(self.refresh_filters)
+        facets_row.addWidget(self.refresh_filters_button)
+        outer.addLayout(facets_row)
 
         index_row = QHBoxLayout()
         self.index_btn = QPushButton("Index / Update Library")
@@ -165,6 +227,7 @@ class SearchPanel(QWidget):
         )
         outer.addWidget(self.result_status)
         self._update_ocr_info()
+        self.refresh_filters()
 
     def _update_ocr_info(self):
         selected = str(self.settings.value("tesseract_path", ""))
@@ -270,17 +333,97 @@ class SearchPanel(QWidget):
         self.ocr_checkbox.setEnabled(True)
         self.language.setEnabled(True)
 
+    def refresh_filters(self):
+        if self.catalog_getter is None:
+            return
+        catalog = self.catalog_getter()
+        previous_tag = self.tag_filter.currentData()
+        previous_shelf = self.shelf_filter.currentData()
+        self.tag_filter.blockSignals(True)
+        self.shelf_filter.blockSignals(True)
+        try:
+            self.tag_filter.clear()
+            self.tag_filter.addItem("Any tag", None)
+            for tag in catalog.list_tags(self.root_getter()):
+                self.tag_filter.addItem(tag, tag)
+            self.shelf_filter.clear()
+            self.shelf_filter.addItem("Any shelf", None)
+            for shelf in catalog.list_collections():
+                self.shelf_filter.addItem(shelf["name"], shelf["id"])
+            self.tag_filter.setCurrentIndex(
+                max(0, self.tag_filter.findData(previous_tag))
+            )
+            self.shelf_filter.setCurrentIndex(
+                max(0, self.shelf_filter.findData(previous_shelf))
+            )
+        finally:
+            self.tag_filter.blockSignals(False)
+            self.shelf_filter.blockSignals(False)
+
+    def _allowed_paths(self) -> set[str] | None:
+        tag = self.tag_filter.currentData()
+        shelf_id = self.shelf_filter.currentData()
+        keyword = self.meta_filter.text().strip().casefold()
+        if tag is None and shelf_id is None and not keyword:
+            return None
+        selected = set(self.books_getter())
+        if self.catalog_getter is None:
+            return selected
+        catalog = self.catalog_getter()
+        if tag is not None:
+            selected &= catalog.paths_for_tag(str(tag))
+        if shelf_id is not None:
+            selected &= catalog.get_collection_paths(int(shelf_id))
+        if keyword:
+            selected = {
+                path for path in selected
+                if any(
+                    keyword in str(meta.get(field) or "").casefold()
+                    for meta in [catalog.get_metadata(path)]
+                    for field in ("authors", "publisher", "edition", "game_system")
+                )
+            }
+        return selected
+
     def search(self):
+        if self.search_worker is not None:
+            return
         query = self.query.text().strip()
         self.results.clear()
         if not query:
             self.result_status.setText("Enter a search query.")
             return
+        mode = self.mode.currentData()
+        allowed = self._allowed_paths()
+        if mode in ("fuzzy", "regex"):
+            worker = SearchWorker(
+                self.index.path, query, mode, self.root_getter(), allowed
+            )
+            self.search_worker = worker
+            self.search_btn.setEnabled(False)
+            self.result_status.setText("Searching indexed pages...")
+            worker.completed.connect(self._display_results)
+            worker.failed.connect(
+                lambda error: self.result_status.setText(error)
+            )
+            worker.finished.connect(self._search_worker_finished)
+            worker.start()
+            return
         try:
-            rows = self.index.search(query, self.root_getter(), self.mode.currentData())
+            rows = self.index.search(
+                query, self.root_getter(), mode, allowed_paths=allowed
+            )
         except ValueError as exc:
             self.result_status.setText(str(exc))
             return
+        self._display_results(rows, "")
+
+    def _search_worker_finished(self):
+        self.search_worker = None
+        self.search_btn.setEnabled(True)
+
+    def _display_results(self, rows: list[dict], notice: str):
+        self.results.clear()
         books = self.books_getter()
         shown = 0
         for result in rows:
@@ -302,6 +445,7 @@ class SearchPanel(QWidget):
         self.result_status.setText(
             f"{note} from indexed pages in the selected library. "
             "Double-click to open the matching page."
+            + (f" {notice}" if notice else "")
         )
 
     def _open_match(self, item: QListWidgetItem):
@@ -310,6 +454,9 @@ class SearchPanel(QWidget):
             self.open_result(result["path"], result["page_index"])
 
     def shutdown(self):
+        if self.search_worker:
+            self.search_worker.requestInterruption()
+            self.search_worker.wait()
         if self.worker:
             self.worker.requestInterruption()
             self.worker.wait()
