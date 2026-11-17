@@ -18,6 +18,7 @@ from .advanced_search import AdvancedSearcher
 from .catalog import Catalog
 from .benchmark import benchmark_index, format_benchmark
 from .search_context import context_for_book, source_label
+from .region_ocr import extract_small_region_text
 
 
 class IndexWorker(QThread):
@@ -28,6 +29,7 @@ class IndexWorker(QThread):
         self, db_path: Path, root: Path, books: list[Path],
         tesseract_path: str, enable_ocr: bool, language: str = "eng",
         mixed_ocr: bool = False,
+        small_region_ocr: bool = False,
     ):
         super().__init__()
         self.db_path = Path(db_path)
@@ -37,6 +39,7 @@ class IndexWorker(QThread):
         self.enable_ocr = enable_ocr
         self.language = language
         self.mixed_ocr = mixed_ocr
+        self.small_region_ocr = small_region_ocr
 
     def run(self):
         index = None
@@ -44,6 +47,8 @@ class IndexWorker(QThread):
             "books": 0, "pages": 0, "waiting_ocr": 0,
             "errors": [], "cancelled": False, "ocr_available": False,
             "mixed_checked": 0, "mixed_added": 0,
+            "region_checked": 0, "region_candidates": 0, "region_added": 0,
+            "region_failed": 0,
         }
         try:
             index = PageIndex(self.db_path)
@@ -62,6 +67,10 @@ class IndexWorker(QThread):
                         cancel=self.isInterruptionRequested,
                         ocr=lambda page, exe: read_ocr(page, exe, self.language),
                         mixed_ocr=self.mixed_ocr,
+                        small_region_ocr=self.small_region_ocr,
+                        region_reader=lambda page, exe: extract_small_region_text(
+                            page, exe, self.language,
+                        ),
                         progress=lambda page, pages, source, name=path.name, number=ordinal: (
                             self.progress.emit(
                                 number, total,
@@ -74,6 +83,10 @@ class IndexWorker(QThread):
                     outcome["waiting_ocr"] += report["pending_ocr"]
                     outcome["mixed_checked"] += report["mixed_checked"]
                     outcome["mixed_added"] += report["mixed_added"]
+                    outcome["region_checked"] += report["region_checked"]
+                    outcome["region_candidates"] += report["region_candidates"]
+                    outcome["region_added"] += report["region_added"]
+                    outcome["region_failed"] += report["region_failed"]
                 except IndexCancelled:
                     outcome["cancelled"] = True
                     break
@@ -269,6 +282,26 @@ class SearchPanel(QWidget):
         )
         advanced_ocr_row.addWidget(self.index_scope, 1)
         outer.addLayout(advanced_ocr_row)
+        region_ocr_row = QHBoxLayout()
+        self.region_checkbox = QCheckBox(
+            "Inspect smaller embedded image regions (experimental, slower)"
+        )
+        self.region_checkbox.setChecked(False)
+        self.region_checkbox.setToolTip(
+            "For pages with existing text, crop raster image objects covering "
+            "approximately 0.3%-10% of the page and OCR up to six regions "
+            "per page. Select one book first; diagrams may add no text."
+        )
+        self.region_checkbox.toggled.connect(
+            lambda checked: self.mixed_checkbox.setChecked(False) if checked else None
+        )
+        self.mixed_checkbox.toggled.connect(
+            lambda checked: self.region_checkbox.setChecked(False) if checked else None
+        )
+        self.ocr_checkbox.toggled.connect(self.region_checkbox.setEnabled)
+        region_ocr_row.addWidget(self.region_checkbox)
+        region_ocr_row.addStretch(1)
+        outer.addLayout(region_ocr_row)
 
         self.ocr_info = QLabel()
         self.ocr_info.setWordWrap(True)
@@ -360,6 +393,7 @@ class SearchPanel(QWidget):
         self.ocr_checkbox.setEnabled(False)
         self.benchmark_btn.setEnabled(False)
         self.mixed_checkbox.setEnabled(False)
+        self.region_checkbox.setEnabled(False)
         self.index_scope.setEnabled(False)
         self.language.setEnabled(False)
         self.result_status.setText(
@@ -371,6 +405,8 @@ class SearchPanel(QWidget):
             self.ocr_checkbox.isChecked(), language,
             mixed_ocr=self.ocr_checkbox.isChecked()
             and self.mixed_checkbox.isChecked(),
+            small_region_ocr=self.ocr_checkbox.isChecked()
+            and self.region_checkbox.isChecked(),
         )
         self.worker = worker
         worker.progress.connect(self._on_progress)
@@ -395,7 +431,11 @@ class SearchPanel(QWidget):
             f"{result['pages']} new/reprocessed pages, "
             f"{result['waiting_ocr']} pages awaiting OCR. "
             f"Mixed pages checked: {result['mixed_checked']}; "
-            f"with new text: {result['mixed_added']}."
+            f"with new text: {result['mixed_added']}. "
+            f"Small-region pages checked: {result['region_checked']}; "
+            f"image regions found: {result['region_candidates']}; "
+            f"pages with additional text: {result['region_added']}; "
+            f"OCR failures: {result['region_failed']} (retryable)."
         )
         if not result["ocr_available"] and self.ocr_checkbox.isChecked():
             summary += " Tesseract not found; scanned pages remain pending."
@@ -413,6 +453,7 @@ class SearchPanel(QWidget):
         self.ocr_checkbox.setEnabled(True)
         self.benchmark_btn.setEnabled(self.benchmark_worker is None)
         self.mixed_checkbox.setEnabled(True)
+        self.region_checkbox.setEnabled(True)
         self.index_scope.setEnabled(True)
         self.language.setEnabled(True)
 

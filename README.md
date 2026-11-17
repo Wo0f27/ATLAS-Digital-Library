@@ -24,6 +24,7 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Optional offline Tesseract OCR for image-only or nearly textless pages; OCR text is stored in the local search index.
 - Resumable indexing: unchanged files are skipped and interrupted PDFs continue at the last committed page.
 - Optional **Inspect mixed text/image pages** setting for OCR on otherwise text-readable pages containing large raster regions, with a single-book index scope for safe testing.
+- Additional opt-in **Inspect smaller embedded image regions** pass, cropping up to six candidate images per text-rich page without repeating large-page OCR.
 - Source-aware search results and an embedded reader excerpt panel for text/OCR matches, with previous/next result navigation.
 - **Benchmark Index** shows local indexed document/page counts, search index size and sample query timings.
 - OCR result page-location previews with local, cached Tesseract TSV word bounding boxes and zoomable highlights.
@@ -131,9 +132,29 @@ segmentation. Processing fully illustrated books may take considerable time.
 OCR-derived text is searchable in the library-wide Search tab, but not yet
 selectable or visually highlighted inside the PDF view.
 
+### Smaller image-region OCR (experimental)
+
+If a sourcebook page contains selectable PDF text alongside **smaller raster
+images carrying text**, first select that individual book under **Index scope**,
+enable **OCR scanned pages**, and tick **Inspect smaller embedded image regions**.
+This is a separate pass from **Inspect mixed text/image pages**; selecting
+one turns the other off.
+
+The detector finds PDF image objects occupying roughly **0.3%–10% of a page**,
+renders the page once, and crops up to **six image regions per page** for local
+Tesseract OCR. It retains existing native text and OCR results, appends only
+new recognized lines, and records per-page checkpoints so unchanged books do
+not need this extra pass again. Failed crops remain retryable. All work stays
+offline, and the original sourcebook is never modified.
+
+This is an experimental candidate detector, not an exhaustive page analyzer:
+vector drawings, tiny images, rotated page content, or scanned words embedded
+inside larger artwork may still be missed. Decorative images may yield no
+useful text. Test on one sourcebook before choosing the entire library.
+
 Current limitations:
-- Mixed-page OCR uses a large-image heuristic, not image-only region cropping.
-  Small scanned text blocks below the threshold may still be missed.
+- The detector examines embedded raster objects; some smaller or rotated
+  text regions may still be missed.
 - OCR quality depends on scan resolution, language, and unusual page layouts.
 - Fuzzy search currently supports one Latin-alphabet word and is bounded by
   vocabulary size; it cannot recognize every misspelling or search phrases.
