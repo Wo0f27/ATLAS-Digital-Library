@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -268,27 +269,48 @@ class PageIndex:
             return " AND ".join('"' + token + '"' for token in tokens[:40])
         raise ValueError("Unknown search mode")
 
+    @contextmanager
+    def scoped_paths(self, allowed_paths: set[str] | None):
+        """Optional per-query whitelist of cataloged paths, with no query-size limit."""
+        self.connection.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS atlas_search_scope(path TEXT PRIMARY KEY)"
+        )
+        self.connection.execute("DELETE FROM atlas_search_scope")
+        try:
+            if allowed_paths is not None:
+                self.connection.executemany(
+                    "INSERT INTO atlas_search_scope(path) VALUES (?)",
+                    [(p,) for p in sorted(allowed_paths)],
+                )
+            yield
+        finally:
+            self.connection.execute("DELETE FROM atlas_search_scope")
+
     def search(
-        self, query: str, root: Path | str, mode: str = "words", limit: int = 150
+        self, query: str, root: Path | str, mode: str = "words", limit: int = 150,
+        allowed_paths: set[str] | None = None,
     ) -> list[dict]:
         expression = self._match_expression(query, mode)
         if not expression:
             return []
         try:
-            rows = self.connection.execute(
-                """
-                SELECT p.path, p.page_index, p.source,
-                       snippet(page_fts, 0, '[', ']', '…', 23) AS excerpt,
-                       bm25(page_fts) AS relevance
-                FROM page_fts
-                JOIN page_text p ON p.id=page_fts.rowid
-                JOIN indexed_files f ON f.path=p.path
-                WHERE page_fts MATCH ? AND f.library_root=?
-                ORDER BY bm25(page_fts), p.path, p.page_index
-                LIMIT ?
-                """,
-                (expression, str(root), min(500, max(1, int(limit)))),
-            ).fetchall()
+            with self.scoped_paths(allowed_paths):
+                rows = self.connection.execute(
+                    """
+                    SELECT p.path, p.page_index, p.source,
+                           snippet(page_fts, 0, '[', ']', '…', 23) AS excerpt,
+                           bm25(page_fts) AS relevance
+                    FROM page_fts
+                    JOIN page_text p ON p.id=page_fts.rowid
+                    JOIN indexed_files f ON f.path=p.path
+                    WHERE page_fts MATCH ? AND f.library_root=?
+                      AND (?=0 OR p.path IN (SELECT path FROM atlas_search_scope))
+                    ORDER BY bm25(page_fts), p.path, p.page_index
+                    LIMIT ?
+                    """,
+                    (expression, str(root), int(allowed_paths is not None),
+                     min(500, max(1, int(limit)))),
+                ).fetchall()
         except sqlite3.OperationalError as exc:
             raise ValueError(f"Invalid FTS5 query: {exc}") from exc
         return [dict(row) for row in rows]
