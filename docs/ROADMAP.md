@@ -36,15 +36,17 @@
 - [x] Validate indexing, page links, OCR, and resume on user's Windows library
 - [x] Opt-in OCR pass for text-rich pages containing substantial raster images
 - [x] Preserve native text and avoid exact repeated lines when combining OCR results
-- [ ] Validate mixed-content OCR on a real book using the single-book scope
+- [x] Validate mixed-content OCR on a real book using the single-book scope
 - [ ] Improve image-region-only OCR detection for smaller embedded illustrations
 - [x] Initial fuzzy single-word and bounded regex search modes
 - [x] Search metadata, tag and shelf filters applied before result limiting
 - [x] FTS5 supports Boolean and NEAR proximity queries
 - [x] Validate fuzzy/regex and metadata filters on user's Windows machine
 - [ ] Expand approximate multi-word queries and additional search refinements
-- [ ] Search in reader highlights for OCR results
-- [ ] Performance benchmark and index-size checks on a large collection
+- [x] Show OCR-origin labels and highlighted excerpts in reader search-context panel
+- [ ] Accurate on-page OCR highlighting (requires word coordinates)
+- [x] Read-only local search-index benchmark button and per-query timings
+- [ ] Run benchmark and check index size on the user's large collection
 
 ## Milestone 4 — Organization and personalization
 
