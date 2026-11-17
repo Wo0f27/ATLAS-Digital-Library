@@ -20,6 +20,7 @@ from typing import Callable
 import pypdfium2 as pdfium
 
 from .hybrid_ocr import large_embedded_image, merge_ocr_text
+from .region_ocr import extract_small_region_text
 
 
 class IndexCancelled(Exception):
@@ -125,6 +126,15 @@ class PageIndex:
                 PRIMARY KEY(path, page_index)
             );
 
+            CREATE TABLE IF NOT EXISTS small_region_ocr_pages (
+                path TEXT NOT NULL,
+                page_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                last_error TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(path, page_index)
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
                 text, content='page_text', content_rowid='id',
                 tokenize='unicode61 remove_diacritics 2'
@@ -180,6 +190,9 @@ class PageIndex:
             self.connection.execute("DELETE FROM page_text WHERE path=?", (str(path),))
             self.connection.execute(
                 "DELETE FROM hybrid_ocr_pages WHERE path=?", (str(path),)
+            )
+            self.connection.execute(
+                "DELETE FROM small_region_ocr_pages WHERE path=?", (str(path),)
             )
             self.connection.execute(
                 """
@@ -251,6 +264,42 @@ class PageIndex:
             (str(path), int(before_page)),
         )
         return [int(row["page_index"]) for row in rows]
+
+    def small_region_pending(self, path: Path, before_page: int) -> list[int]:
+        """Previously indexed text/mixed pages without a finished small-region pass."""
+        rows = self.connection.execute(
+            """
+            SELECT p.page_index
+            FROM page_text p
+            LEFT JOIN small_region_ocr_pages r
+              ON r.path=p.path AND r.page_index=p.page_index
+            WHERE p.path=? AND p.page_index < ?
+              AND p.source IN ('text', 'mixed')
+              AND (r.status IS NULL OR r.status='error')
+            ORDER BY p.page_index
+            """,
+            (str(path), int(before_page)),
+        )
+        return [int(row["page_index"]) for row in rows]
+
+    def mark_small_region(
+        self, path: Path, page_index: int, status: str, error: str = "",
+    ) -> None:
+        if status not in ("done", "no_image", "no_new_text", "error"):
+            raise ValueError("Invalid small-region OCR status")
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO small_region_ocr_pages(
+                    path, page_index, status, last_error, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(path,page_index) DO UPDATE SET
+                    status=excluded.status,
+                    last_error=excluded.last_error,
+                    updated_at=excluded.updated_at
+                """,
+                (str(path), int(page_index), status, error[:400], _now()),
+            )
 
     def page_record(self, path: Path, page_index: int) -> dict | None:
         row = self.connection.execute(
@@ -383,8 +432,12 @@ def index_pdf(
     ocr: Callable[[object, Path], str] = read_ocr,
     mixed_ocr: bool = False,
     image_detector: Callable[[object], bool] = large_embedded_image,
+    small_region_ocr: bool = False,
+    region_reader: Callable[[object, Path], tuple[list[str], int]] = extract_small_region_text,
 ) -> dict:
-    """Resumable indexing, optionally revisiting text-rich pages with raster art."""
+    """Resumable indexing with independent large-image and small-region passes."""
+    if mixed_ocr and small_region_ocr:
+        raise ValueError("Choose either mixed-page or small-region OCR per pass")
     path = Path(path).resolve()
     root = Path(root).resolve()
     stat = path.stat()
@@ -397,20 +450,32 @@ def index_pdf(
         mixed_old = (
             repository.hybrid_pending(path, start) if wants_mixed else []
         )
+        wants_small = bool(small_region_ocr and ocr_binary is not None)
+        small_old = repository.small_region_pending(path, start) if wants_small else []
 
-        if start >= count and not (ocr_binary is not None and pending_before) and not mixed_old:
+        if start >= count and not (
+            (ocr_binary is not None and pending_before) or mixed_old or small_old
+        ):
             final = repository.finish(path)
-            return {"pages": count, "indexed": 0, "mixed_checked": 0,
-                    "mixed_added": 0, **final}
+            return {
+                "pages": count, "indexed": 0, "mixed_checked": 0,
+                "mixed_added": 0, "region_checked": 0,
+                "region_candidates": 0, "region_added": 0, **final,
+            }
 
+        candidates = set(mixed_old) | set(small_old)
         if start >= count:
-            indices = sorted(set(pending_before if ocr_binary else []) | set(mixed_old))
+            candidates |= set(pending_before if ocr_binary else [])
         else:
-            indices = sorted(set(range(start, count)) | set(mixed_old))
+            candidates |= set(range(start, count))
+        indices = sorted(candidates)
 
         indexed = 0
         mixed_checked = 0
         mixed_added = 0
+        region_checked = 0
+        region_candidates = 0
+        region_added = 0
         for page_index in indices:
             if cancel and cancel():
                 raise IndexCancelled()
@@ -421,18 +486,21 @@ def index_pdf(
             text_page = None
             prior = repository.page_record(path, page_index) if page_index < start else None
             is_old_mixed = bool(prior and page_index in mixed_old)
-            should_update_text = not is_old_mixed
+            is_old_small = bool(prior and page_index in small_old)
+            should_update_text = not (is_old_mixed or is_old_small)
             hybrid_status = None
             hybrid_error = ""
+            region_status = None
+            region_error = ""
             try:
                 page = document[page_index]
-                if is_old_mixed:
+                if is_old_mixed or is_old_small:
                     text = prior["text"]
                     source = prior["source"]
                 else:
                     text_page = page.get_textpage()
                     text = text_page.get_text_bounded().replace("\r\n", "\n").strip()
-                if not has_meaningful_text(text) and not is_old_mixed:
+                if not has_meaningful_text(text) and not (is_old_mixed or is_old_small):
                     if ocr_binary is None:
                         source = "ocr_pending"
                     else:
@@ -463,10 +531,34 @@ def index_pdf(
                         hybrid_status = "error"
                         hybrid_error = f"{type(exc).__name__}: {exc}"
                         error = f"Mixed OCR page {page_index + 1}: {exc}"
+                elif wants_small and has_meaningful_text(text) and source in ("text", "mixed"):
+                    try:
+                        region_checked += 1
+                        recognized_chunks, region_count = region_reader(page, ocr_binary)
+                        region_candidates += region_count
+                        recognized = "\n".join(recognized_chunks)
+                        merged, new_lines = merge_ocr_text(text, recognized)
+                        if new_lines:
+                            text = merged
+                            source = "mixed"
+                            region_added += 1
+                            should_update_text = True
+                        region_status = (
+                            "done" if new_lines else
+                            ("no_new_text" if region_count else "no_image")
+                        )
+                    except Exception as exc:
+                        # Never overwrite native text when a crop or OCR step fails.
+                        region_status = "error"
+                        region_error = f"{type(exc).__name__}: {exc}"
+                        error = f"Region OCR page {page_index + 1}: {exc}"
             except Exception as exc:
-                if not is_old_mixed:
+                if not (is_old_mixed or is_old_small):
                     source = "error"
                     error = f"Text page {page_index + 1}: {exc}"
+                elif is_old_small:
+                    error = f"Region OCR page {page_index + 1}: {exc}"
+                    region_status, region_error = "error", error
                 else:
                     error = f"Mixed OCR page {page_index + 1}: {exc}"
                     hybrid_status = "error"
@@ -480,17 +572,24 @@ def index_pdf(
             if should_update_text:
                 repository.put_page(path, page_index, text, source, error)
             if hybrid_status is not None:
-                # The searchable page is committed before marking OCR checked.
-                # A crash can at worst cause a retry, never a lost OCR result.
+                # Searchable text commits before completion checkpoints.
                 repository.mark_hybrid(
                     path, page_index, hybrid_status, hybrid_error,
+                )
+            if region_status is not None:
+                repository.mark_small_region(
+                    path, page_index, region_status, region_error,
                 )
             indexed += 1
             if progress:
                 progress(page_index + 1, count, source)
         final = repository.finish(path)
-        return {"pages": count, "indexed": indexed,
-                "mixed_checked": mixed_checked, "mixed_added": mixed_added,
-                **final}
+        return {
+            "pages": count, "indexed": indexed,
+            "mixed_checked": mixed_checked, "mixed_added": mixed_added,
+            "region_checked": region_checked,
+            "region_candidates": region_candidates,
+            "region_added": region_added, **final,
+        }
     finally:
         document.close()
