@@ -2,7 +2,7 @@
 
 A native, offline-first Windows digital bookshelf for your personal document collection.
 
-**Development status:** Milestone 3 in development (page-level search, initial OCR and opt-in mixed-page OCR). The complete DocGoblin-style search suite and standalone Windows executable are not finished.
+**Development status:** Milestone 3 core search/OCR functionality validated on Windows; Milestone 4 organization and personalization is beginning. Advanced refinements and the standalone Windows executable remain unfinished.
 
 ## Currently implemented
 
@@ -11,6 +11,8 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - PDF first-page cover thumbnails, cached outside the repository.
 - SQLite catalog that survives application restarts.
 - Search by filename/title and browse by existing physical folders.
+- Choose **Root folder first** in the bookshelf sort menu to prioritize PDFs directly inside the selected library folder, with titles alphabetized within each group.
+- Use **Folders → All Books → Library root (PDFs only)** to view only those top-level PDFs, excluding nested subfolders.
 - Double-click a book to read it in a tab inside A.T.L.A.S.
 - Embedded reader: previous/next page, page number jump, continuous or single-page mode, fit-to-width/page, custom zoom, PDF table of contents and in-book text search.
 - Last page and viewing preferences saved automatically in the local catalog.
@@ -63,11 +65,24 @@ how A.T.L.A.S. lists the book; its original filename is retained.
 Select **Add to virtual shelves** to place the book into multiple shelves.
 Use the **Shelves** tab in the left navigation to create, rename, or delete shelves.
 The **Tags** tab lists tags found on books in the active library folder.
-Existing physical folders remain browseable under **Folders**.
+Existing physical folders remain browseable under **Folders**. The **Root folder first** sort option changes only the display order, and the **Library root (PDFs only)** folder entry filters the bookshelf to documents stored directly in the selected library directory. Both preserve virtual shelves and file locations.
 
 All book metadata, personal notes, virtual shelves, and tags are saved in the local
 SQLite catalog and survive ordinary rescans. Deleting a virtual shelf only removes
 its membership records, never the original PDFs.
+
+## Root-folder sorting
+
+The default bookshelf order is **Title A–Z** across all visible books. Choose
+**Root folder first** to place PDFs directly inside your selected library root
+before books stored in subfolders. Titles remain alphabetical within the
+root-level and nested-book groups. This sort preference is saved between
+application launches.
+
+To see **only** PDFs placed directly in the root, select
+**Folders → All Books → Library root (PDFs only)**. Select **All Books**
+to restore the complete library. Both controls affect presentation only;
+they never relocate, rename or modify PDFs.
 
 ## Full-text indexing and offline OCR
 
@@ -223,7 +238,7 @@ own computer**; it is excluded from GitHub, along with original PDFs.
 
 ## Upcoming work
 
-See docs/ROADMAP.md. The built-in reader, metadata editor, virtual shelves, page-level FTS5/OCR, and first fuzzy/regex/metadata facet controls are implemented. More advanced OCR, search highlighting, scalability benchmarking, theming, and the standalone Windows .exe remain planned. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
+See docs/ROADMAP.md. The Windows-validated reader, metadata editor, virtual shelves, full-text/OCR search, in-reader OCR highlights and local index benchmarking are implemented. Further OCR/search enhancements are optional refinements; duplicate management, customizable themes, backups and the standalone Windows .exe remain planned. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
 
 ## Technology and licensing
 
