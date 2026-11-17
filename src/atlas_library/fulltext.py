@@ -422,6 +422,8 @@ def index_pdf(
             prior = repository.page_record(path, page_index) if page_index < start else None
             is_old_mixed = bool(prior and page_index in mixed_old)
             should_update_text = not is_old_mixed
+            hybrid_status = None
+            hybrid_error = ""
             try:
                 page = document[page_index]
                 if is_old_mixed:
@@ -453,18 +455,13 @@ def index_pdf(
                                 source = "mixed"
                                 mixed_added += 1
                                 should_update_text = True
-                            repository.mark_hybrid(
-                                path, page_index,
-                                "done" if added_lines else "no_new_text",
-                            )
+                            hybrid_status = "done" if added_lines else "no_new_text"
                         else:
-                            repository.mark_hybrid(path, page_index, "no_image")
+                            hybrid_status = "no_image"
                     except Exception as exc:
                         # Preserve the pre-existing searchable native text.
-                        repository.mark_hybrid(
-                            path, page_index, "error",
-                            f"{type(exc).__name__}: {exc}",
-                        )
+                        hybrid_status = "error"
+                        hybrid_error = f"{type(exc).__name__}: {exc}"
                         error = f"Mixed OCR page {page_index + 1}: {exc}"
             except Exception as exc:
                 if not is_old_mixed:
@@ -472,7 +469,8 @@ def index_pdf(
                     error = f"Text page {page_index + 1}: {exc}"
                 else:
                     error = f"Mixed OCR page {page_index + 1}: {exc}"
-                    repository.mark_hybrid(path, page_index, "error", error)
+                    hybrid_status = "error"
+                    hybrid_error = error
             finally:
                 if text_page is not None:
                     text_page.close()
@@ -481,6 +479,12 @@ def index_pdf(
 
             if should_update_text:
                 repository.put_page(path, page_index, text, source, error)
+            if hybrid_status is not None:
+                # The searchable page is committed before marking OCR checked.
+                # A crash can at worst cause a retry, never a lost OCR result.
+                repository.mark_hybrid(
+                    path, page_index, hybrid_status, hybrid_error,
+                )
             indexed += 1
             if progress:
                 progress(page_index + 1, count, source)
