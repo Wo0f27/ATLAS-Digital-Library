@@ -16,10 +16,18 @@ from atlas_library.hybrid_ocr import large_embedded_image
 from atlas_library.region_ocr import extract_small_region_text, small_image_regions
 
 
+# Prevent Qt's QApplication from being released while other test widgets
+# remain pending for deletion during a combined Windows pytest process.
+_QT_APP = None
+
+
 def make_mixed_region_pdf(path: Path, phrase: str = "The elder wizard protects the mountain library."):
     """Real PDFium-readable PDF with selectable text and a 1.5% raster object."""
     image = Image.new("L", (360, 180), 240)
-    packed = zlib.compress(image.tobytes())
+    try:
+        packed = zlib.compress(image.tobytes())
+    finally:
+        image.close()
     stream = (
         f"BT /F1 16 Tf 52 735 Td ({phrase}) Tj ET\n"
         "q 120 0 0 60 65 570 cm /Im1 Do Q\n"
@@ -195,7 +203,10 @@ def test_region_checkpoint_resets_for_changed_pdf(tmp_path: Path):
 
 
 def test_ocr_modes_are_exclusive_and_ui_defaults_are_safe(tmp_path, monkeypatch):
-    app = QApplication.instance() or QApplication([])
+    global _QT_APP
+    if _QT_APP is None:
+        _QT_APP = QApplication.instance() or QApplication([])
+    app = _QT_APP
     root = tmp_path / "books"
     root.mkdir()
     pdf = root / "Hybrid.pdf"
@@ -235,3 +246,5 @@ def test_ocr_modes_are_exclusive_and_ui_defaults_are_safe(tmp_path, monkeypatch)
     panel.ocr_checkbox.setChecked(True)
     assert panel.region_checkbox.isEnabled()
     window.close()
+    window.deleteLater()
+    app.processEvents()
