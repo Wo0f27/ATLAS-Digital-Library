@@ -34,11 +34,14 @@
 - [x] Background indexer with cancellation, incremental updates, and per-page resume
 - [x] Search modes: all words, exact phrase, and user-authored FTS5 Boolean/NEAR
 - [x] Validate indexing, page links, OCR, and resume on user's Windows library
-- [ ] OCR advanced handling for pages mixing substantial text and scanned images
+- [x] Opt-in OCR pass for text-rich pages containing substantial raster images
+- [x] Preserve native text and avoid exact repeated lines when combining OCR results
+- [ ] Validate mixed-content OCR on a real book using the single-book scope
+- [ ] Improve image-region-only OCR detection for smaller embedded illustrations
 - [x] Initial fuzzy single-word and bounded regex search modes
 - [x] Search metadata, tag and shelf filters applied before result limiting
 - [x] FTS5 supports Boolean and NEAR proximity queries
-- [ ] Validate fuzzy/regex and metadata filters on user's Windows machine
+- [x] Validate fuzzy/regex and metadata filters on user's Windows machine
 - [ ] Expand approximate multi-word queries and additional search refinements
 - [ ] Search in reader highlights for OCR results
 - [ ] Performance benchmark and index-size checks on a large collection

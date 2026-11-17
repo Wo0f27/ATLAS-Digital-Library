@@ -19,6 +19,8 @@ from typing import Callable
 
 import pypdfium2 as pdfium
 
+from .hybrid_ocr import large_embedded_image, merge_ocr_text
+
 
 class IndexCancelled(Exception):
     """An index job stopped at a safe page boundary."""
@@ -114,6 +116,15 @@ class PageIndex:
             CREATE INDEX IF NOT EXISTS idx_page_text_book
                 ON page_text(path, page_index);
 
+            CREATE TABLE IF NOT EXISTS hybrid_ocr_pages (
+                path TEXT NOT NULL,
+                page_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                last_error TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(path, page_index)
+            );
+
             CREATE VIRTUAL TABLE IF NOT EXISTS page_fts USING fts5(
                 text, content='page_text', content_rowid='id',
                 tokenize='unicode61 remove_diacritics 2'
@@ -168,6 +179,9 @@ class PageIndex:
         with self.connection:
             self.connection.execute("DELETE FROM page_text WHERE path=?", (str(path),))
             self.connection.execute(
+                "DELETE FROM hybrid_ocr_pages WHERE path=?", (str(path),)
+            )
+            self.connection.execute(
                 """
                 INSERT INTO indexed_files(
                     path, library_root, size_bytes, modified_ns,
@@ -221,6 +235,48 @@ class PageIndex:
                 (str(path),),
             )
         ]
+
+    def hybrid_pending(self, path: Path, before_page: int) -> list[int]:
+        """Already indexed native-text pages not yet checked in mixed OCR mode."""
+        rows = self.connection.execute(
+            """
+            SELECT p.page_index
+            FROM page_text p
+            LEFT JOIN hybrid_ocr_pages h
+              ON h.path=p.path AND h.page_index=p.page_index
+            WHERE p.path=? AND p.page_index < ? AND p.source='text'
+              AND (h.status IS NULL OR h.status='error')
+            ORDER BY p.page_index
+            """,
+            (str(path), int(before_page)),
+        )
+        return [int(row["page_index"]) for row in rows]
+
+    def page_record(self, path: Path, page_index: int) -> dict | None:
+        row = self.connection.execute(
+            "SELECT text, source FROM page_text WHERE path=? AND page_index=?",
+            (str(path), int(page_index)),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def mark_hybrid(
+        self, path: Path, page_index: int, status: str, error: str = ""
+    ) -> None:
+        if status not in ("done", "no_image", "no_new_text", "error"):
+            raise ValueError("Unknown hybrid OCR status")
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO hybrid_ocr_pages (
+                    path, page_index, status, last_error, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(path, page_index) DO UPDATE SET
+                    status=excluded.status,
+                    last_error=excluded.last_error,
+                    updated_at=excluded.updated_at
+                """,
+                (str(path), int(page_index), status, error[:400], _now()),
+            )
 
     def finish(self, path: Path) -> dict:
         pending = len(self.pending_pages(path))
@@ -325,8 +381,10 @@ def index_pdf(
     cancel: Callable[[], bool] | None = None,
     progress: Callable[[int, int, str], None] | None = None,
     ocr: Callable[[object, Path], str] = read_ocr,
+    mixed_ocr: bool = False,
+    image_detector: Callable[[object], bool] = large_embedded_image,
 ) -> dict:
-    """Resumable indexing. OCR missing pages when a local engine is available."""
+    """Resumable indexing, optionally revisiting text-rich pages with raster art."""
     path = Path(path).resolve()
     root = Path(root).resolve()
     stat = path.stat()
@@ -335,17 +393,24 @@ def index_pdf(
         count = len(document)
         start = repository.prepare(path, root, stat.st_size, stat.st_mtime_ns, count)
         pending_before = repository.pending_pages(path)
+        wants_mixed = bool(mixed_ocr and ocr_binary is not None)
+        mixed_old = (
+            repository.hybrid_pending(path, start) if wants_mixed else []
+        )
 
-        if start >= count and not (ocr_binary is not None and pending_before):
+        if start >= count and not (ocr_binary is not None and pending_before) and not mixed_old:
             final = repository.finish(path)
-            return {"pages": count, "indexed": 0, **final}
+            return {"pages": count, "indexed": 0, "mixed_checked": 0,
+                    "mixed_added": 0, **final}
 
         if start >= count:
-            indices = pending_before
+            indices = sorted(set(pending_before if ocr_binary else []) | set(mixed_old))
         else:
-            indices = list(range(start, count))
+            indices = sorted(set(range(start, count)) | set(mixed_old))
 
         indexed = 0
+        mixed_checked = 0
+        mixed_added = 0
         for page_index in indices:
             if cancel and cancel():
                 raise IndexCancelled()
@@ -354,11 +419,20 @@ def index_pdf(
             error = ""
             page = None
             text_page = None
+            prior = repository.page_record(path, page_index) if page_index < start else None
+            is_old_mixed = bool(prior and page_index in mixed_old)
+            should_update_text = not is_old_mixed
+            hybrid_status = None
+            hybrid_error = ""
             try:
                 page = document[page_index]
-                text_page = page.get_textpage()
-                text = text_page.get_text_bounded().replace("\r\n", "\n").strip()
-                if not has_meaningful_text(text):
+                if is_old_mixed:
+                    text = prior["text"]
+                    source = prior["source"]
+                else:
+                    text_page = page.get_textpage()
+                    text = text_page.get_text_bounded().replace("\r\n", "\n").strip()
+                if not has_meaningful_text(text) and not is_old_mixed:
                     if ocr_binary is None:
                         source = "ocr_pending"
                     else:
@@ -369,20 +443,54 @@ def index_pdf(
                         except Exception as exc:
                             source = "ocr_pending"
                             error = f"OCR page {page_index + 1}: {exc}"
+                elif wants_mixed and has_meaningful_text(text) and source == "text":
+                    try:
+                        is_candidate = image_detector(page)
+                        mixed_checked += 1
+                        if is_candidate:
+                            recognized = ocr(page, ocr_binary)
+                            combined, added_lines = merge_ocr_text(text, recognized)
+                            if added_lines:
+                                text = combined
+                                source = "mixed"
+                                mixed_added += 1
+                                should_update_text = True
+                            hybrid_status = "done" if added_lines else "no_new_text"
+                        else:
+                            hybrid_status = "no_image"
+                    except Exception as exc:
+                        # Preserve the pre-existing searchable native text.
+                        hybrid_status = "error"
+                        hybrid_error = f"{type(exc).__name__}: {exc}"
+                        error = f"Mixed OCR page {page_index + 1}: {exc}"
             except Exception as exc:
-                source = "error"
-                error = f"Text page {page_index + 1}: {exc}"
+                if not is_old_mixed:
+                    source = "error"
+                    error = f"Text page {page_index + 1}: {exc}"
+                else:
+                    error = f"Mixed OCR page {page_index + 1}: {exc}"
+                    hybrid_status = "error"
+                    hybrid_error = error
             finally:
                 if text_page is not None:
                     text_page.close()
                 if page is not None:
                     page.close()
 
-            repository.put_page(path, page_index, text, source, error)
+            if should_update_text:
+                repository.put_page(path, page_index, text, source, error)
+            if hybrid_status is not None:
+                # The searchable page is committed before marking OCR checked.
+                # A crash can at worst cause a retry, never a lost OCR result.
+                repository.mark_hybrid(
+                    path, page_index, hybrid_status, hybrid_error,
+                )
             indexed += 1
             if progress:
                 progress(page_index + 1, count, source)
         final = repository.finish(path)
-        return {"pages": count, "indexed": indexed, **final}
+        return {"pages": count, "indexed": indexed,
+                "mixed_checked": mixed_checked, "mixed_added": mixed_added,
+                **final}
     finally:
         document.close()

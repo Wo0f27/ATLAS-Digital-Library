@@ -24,6 +24,7 @@ class IndexWorker(QThread):
     def __init__(
         self, db_path: Path, root: Path, books: list[Path],
         tesseract_path: str, enable_ocr: bool, language: str = "eng",
+        mixed_ocr: bool = False,
     ):
         super().__init__()
         self.db_path = Path(db_path)
@@ -32,12 +33,14 @@ class IndexWorker(QThread):
         self.tesseract_path = tesseract_path
         self.enable_ocr = enable_ocr
         self.language = language
+        self.mixed_ocr = mixed_ocr
 
     def run(self):
         index = None
         outcome = {
             "books": 0, "pages": 0, "waiting_ocr": 0,
             "errors": [], "cancelled": False, "ocr_available": False,
+            "mixed_checked": 0, "mixed_added": 0,
         }
         try:
             index = PageIndex(self.db_path)
@@ -55,6 +58,7 @@ class IndexWorker(QThread):
                         ocr_binary=binary,
                         cancel=self.isInterruptionRequested,
                         ocr=lambda page, exe: read_ocr(page, exe, self.language),
+                        mixed_ocr=self.mixed_ocr,
                         progress=lambda page, pages, source, name=path.name, number=ordinal: (
                             self.progress.emit(
                                 number, total,
@@ -65,6 +69,8 @@ class IndexWorker(QThread):
                     outcome["books"] += 1
                     outcome["pages"] += report["indexed"]
                     outcome["waiting_ocr"] += report["pending_ocr"]
+                    outcome["mixed_checked"] += report["mixed_checked"]
+                    outcome["mixed_added"] += report["mixed_added"]
                 except IndexCancelled:
                     outcome["cancelled"] = True
                     break
@@ -211,6 +217,28 @@ class SearchPanel(QWidget):
         index_row.addStretch(1)
         outer.addLayout(index_row)
 
+        advanced_ocr_row = QHBoxLayout()
+        self.mixed_checkbox = QCheckBox(
+            "Inspect mixed text/image pages (slower, optional)"
+        )
+        self.mixed_checkbox.setChecked(False)
+        self.mixed_checkbox.setToolTip(
+            "On pages with existing selectable text, check for large raster "
+            "images, then OCR the page and add only text not already indexed. "
+            "This can be much slower on heavily illustrated sourcebooks."
+        )
+        self.ocr_checkbox.toggled.connect(self.mixed_checkbox.setEnabled)
+        advanced_ocr_row.addWidget(self.mixed_checkbox)
+        advanced_ocr_row.addWidget(QLabel("Index scope:"))
+        self.index_scope = QComboBox()
+        self.index_scope.addItem("All library books", None)
+        self.index_scope.setMinimumWidth(260)
+        self.index_scope.setToolTip(
+            "Choose a single sourcebook for a small mixed-content OCR test"
+        )
+        advanced_ocr_row.addWidget(self.index_scope, 1)
+        outer.addLayout(advanced_ocr_row)
+
         self.ocr_info = QLabel()
         self.ocr_info.setWordWrap(True)
         outer.addWidget(self.ocr_info)
@@ -276,7 +304,11 @@ class SearchPanel(QWidget):
             self.result_status.setText("Enter a valid Tesseract language code (e.g. eng).")
             return
         self.settings.setValue("ocr_language", language)
-        books = [Path(path) for path in self.books_getter()]
+        scope = self.index_scope.currentData()
+        books = (
+            [Path(scope)] if scope is not None and scope in self.books_getter()
+            else [Path(path) for path in self.books_getter()]
+        )
         if not books:
             self.result_status.setText("No cataloged PDF files found. Scan the bookshelf first.")
             return
@@ -285,6 +317,8 @@ class SearchPanel(QWidget):
         self.stop_btn.setEnabled(True)
         self.ocr_select_btn.setEnabled(False)
         self.ocr_checkbox.setEnabled(False)
+        self.mixed_checkbox.setEnabled(False)
+        self.index_scope.setEnabled(False)
         self.language.setEnabled(False)
         self.result_status.setText(
             "Indexing on your computer. You may continue reading other books."
@@ -293,6 +327,8 @@ class SearchPanel(QWidget):
             self.index.path, root, books,
             str(self.settings.value("tesseract_path", "")),
             self.ocr_checkbox.isChecked(), language,
+            mixed_ocr=self.ocr_checkbox.isChecked()
+            and self.mixed_checkbox.isChecked(),
         )
         self.worker = worker
         worker.progress.connect(self._on_progress)
@@ -315,7 +351,9 @@ class SearchPanel(QWidget):
             f"{'Stopped' if result['cancelled'] else 'Indexing finished'}: "
             f"{result['books']} books checked, "
             f"{result['pages']} new/reprocessed pages, "
-            f"{result['waiting_ocr']} pages awaiting OCR."
+            f"{result['waiting_ocr']} pages awaiting OCR. "
+            f"Mixed pages checked: {result['mixed_checked']}; "
+            f"with new text: {result['mixed_added']}."
         )
         if not result["ocr_available"] and self.ocr_checkbox.isChecked():
             summary += " Tesseract not found; scanned pages remain pending."
@@ -331,9 +369,12 @@ class SearchPanel(QWidget):
         self.stop_btn.setEnabled(False)
         self.ocr_select_btn.setEnabled(True)
         self.ocr_checkbox.setEnabled(True)
+        self.mixed_checkbox.setEnabled(True)
+        self.index_scope.setEnabled(True)
         self.language.setEnabled(True)
 
     def refresh_filters(self):
+        self._refresh_index_scope()
         if self.catalog_getter is None:
             return
         catalog = self.catalog_getter()
@@ -359,6 +400,26 @@ class SearchPanel(QWidget):
         finally:
             self.tag_filter.blockSignals(False)
             self.shelf_filter.blockSignals(False)
+
+    def _refresh_index_scope(self):
+        previously_selected = self.index_scope.currentData()
+        self.index_scope.blockSignals(True)
+        try:
+            self.index_scope.clear()
+            self.index_scope.addItem("All library books", None)
+            for path, book in sorted(
+                self.books_getter().items(),
+                key=lambda item: (
+                    item[1].get("display_title") or item[1]["title"]
+                ).casefold(),
+            ):
+                self.index_scope.addItem(
+                    (book.get("display_title") or book["title"])[:90], path
+                )
+            found = self.index_scope.findData(previously_selected)
+            self.index_scope.setCurrentIndex(max(0, found))
+        finally:
+            self.index_scope.blockSignals(False)
 
     def _allowed_paths(self) -> set[str] | None:
         tag = self.tag_filter.currentData()
