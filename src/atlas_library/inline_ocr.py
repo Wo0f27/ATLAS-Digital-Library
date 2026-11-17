@@ -34,7 +34,7 @@ class InlineOcrPage(QWidget):
         outer.setContentsMargins(4, 4, 4, 4)
         controls = QHBoxLayout()
         self.back_btn = QPushButton("Return to PDF")
-        self.back_btn.clicked.connect(self.backRequested.emit)
+        self.back_btn.clicked.connect(lambda _checked=False: self.backRequested.emit())
         controls.addWidget(self.back_btn)
         controls.addWidget(QLabel("OCR-highlighted page"))
         controls.addStretch(1)
