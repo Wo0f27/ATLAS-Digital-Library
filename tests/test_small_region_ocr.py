@@ -154,6 +154,7 @@ def test_failed_region_ocr_retries_and_does_not_erase_previous_text(tmp_path: Pa
         ),
     )
     assert result["region_added"] == 0
+    assert result["region_failed"] == 1
     assert index.search("wizard", root)
     assert index.connection.execute(
         "SELECT status FROM small_region_ocr_pages"
@@ -164,6 +165,7 @@ def test_failed_region_ocr_retries_and_does_not_erase_previous_text(tmp_path: Pa
         region_reader=lambda page, exe: (["A secret skyforge workshop."], 1),
     )
     assert recovered["region_added"] == 1
+    assert recovered["region_failed"] == 0
     assert index.search("skyforge", root)
     assert index.small_region_pending(pdf.resolve(), 1) == []
     # Standard scan after detailed OCR must not revert the merged search text.
