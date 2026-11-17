@@ -724,7 +724,8 @@ class LibraryWindow(QMainWindow):
             return
         try:
             reader = PdfReader(
-                path, self.catalog, self.tabs, start_page=target_page
+                path, self.catalog, self.tabs, start_page=target_page,
+                search_db_path=self.data_dir / "search.sqlite3",
             )
         except Exception as exc:
             QMessageBox.warning(self, "Reader error", f"Unable to open PDF:\n{exc}")
