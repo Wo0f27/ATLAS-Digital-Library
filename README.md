@@ -24,6 +24,8 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Optional offline Tesseract OCR for image-only or nearly textless pages; OCR text is stored in the local search index.
 - Resumable indexing: unchanged files are skipped and interrupted PDFs continue at the last committed page.
 - Optional **Inspect mixed text/image pages** setting for OCR on otherwise text-readable pages containing large raster regions, with a single-book index scope for safe testing.
+- Source-aware search results and an embedded reader excerpt panel for text/OCR matches, with previous/next result navigation.
+- **Benchmark Index** shows local indexed document/page counts, search index size and sample query timings.
 - Ctrl+mouse-wheel/trackpad scrolling adjusts zoom smoothly; native pinch is supported when Qt and the trackpad driver deliver a zoom gesture.
 - The bookshelf details sidebar stays fixed-width; full file paths are in tooltips and a Copy full file path control.
 - Optional open in the Windows default PDF application.
@@ -84,7 +86,7 @@ Search options:
   "dragon AND ancient", '"legendary actions"', '"green dragon" OR "blue dragon"',
   and "NEAR(dragon treasure, 6)".
 
-Double-click a result to open the **specific page inside A.T.L.A.S.**. Only books
+Double-click a result to open the **specific page inside A.T.L.A.S.** The reader shows the source of indexed text (selectable PDF, offline OCR, or mixed), highlights the matching words in a separate excerpt panel and provides Previous/Next result controls within the book. This does not place word-level highlights directly on the PDF image: we do not yet store OCR bounding boxes. Only books
 in the active catalog root are displayed. You can combine full-text searches
 with **tag**, **virtual shelf**, and **author/publisher/edition/system**
 filters. Filter matching happens before limiting results to the top 150.
@@ -138,6 +140,12 @@ Current limitations:
 - OCR search highlights inside the embedded reader are not implemented yet.
 - This development build **does not bundle Tesseract**. Bundling OCR and language
   packs for the future Windows installer is part of the distribution phase.
+
+Use **Benchmark Index** to measure your *own* indexed collection. The report shows
+page counts, OCR/mixed page counts, database size (including SQLite write-ahead
+log files), and elapsed milliseconds for five fixed sample FTS5 searches.
+The test does not reprocess your sourcebooks. The report can be selected and
+copied from the results panel. Query timings will vary by machine and cache.
 
 The search index is a separate SQLite database in the Windows per-user app-data
 directory. It contains extracted or OCR-recognized book text **only on your

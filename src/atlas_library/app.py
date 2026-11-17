@@ -671,16 +671,27 @@ class LibraryWindow(QMainWindow):
         self.catalog.set_reading_status(self.selected_path, status)
         self._refresh_gallery()
 
-    def _open_search_result(self, path: str, page_index: int):
+    def _open_search_result(
+        self, path: str, page_index: int,
+        matches: list[dict] | None = None, selected_index: int = 0,
+    ):
         if path not in self.books:
             QMessageBox.warning(
                 self, "Book unavailable", "This indexed PDF is not in the active library."
             )
             return
         self.selected_path = path
-        self.open_book(target_page=int(page_index))
+        self.open_book(
+            target_page=int(page_index),
+            search_matches=matches,
+            match_index=selected_index,
+        )
 
-    def open_book(self, target_page: int | None = None):
+    def open_book(
+        self, target_page: int | None = None,
+        search_matches: list[dict] | None = None,
+        match_index: int = 0,
+    ):
         """Open a PDF internally; optionally navigate to a 0-based search hit."""
         if not self.selected_path:
             return
@@ -703,6 +714,8 @@ class LibraryWindow(QMainWindow):
         existing = self.reader_tabs.get(key)
         if existing is not None:
             self.tabs.setCurrentWidget(existing)
+            if search_matches is not None:
+                existing.set_search_matches(search_matches, match_index)
             if target_page is not None:
                 if existing._loaded:
                     existing.goto_page(target_page)
@@ -720,6 +733,8 @@ class LibraryWindow(QMainWindow):
         index = self.tabs.addTab(reader, path.stem[:34])
         self.tabs.setTabToolTip(index, str(path))
         self.tabs.setCurrentIndex(index)
+        if search_matches is not None:
+            reader.set_search_matches(search_matches, match_index)
 
     def open_external(self):
         if not self.selected_path:
