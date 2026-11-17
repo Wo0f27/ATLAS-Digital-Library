@@ -189,7 +189,8 @@ def _title_for_classification(book: dict) -> str:
     # Publisher is intentionally not an input to classification.
     name = str(book.get("title") or Path(book["path"]).stem)
     display = str(book.get("display_title") or "")
-    return " ".join((name, display)).casefold().replace("_", " ").replace("-", " ")
+    return (" ".join((name, display)).casefold()
+            .replace("_", " ").replace("-", " ").replace("&", " and "))
 
 
 def suggest_folder(book: dict, root: Path) -> tuple[str, str, str, str]:
