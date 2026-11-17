@@ -129,8 +129,10 @@ def test_small_region_ocr_adds_only_new_text_and_checkpoints(tmp_path: Path):
 
     combined, added = merge_ocr_text(
         native,
-        "The elder wizard protects the mountain library.\\n"
-        "A hidden starforge inscription appears in a small diagram.",
+        chr(10).join([
+            "The elder wizard protects the mountain library.",
+            "A hidden starforge inscription appears in a small diagram.",
+        ]),
     )
     assert added == 1
     index.put_page(resolved, 0, combined, "mixed")
