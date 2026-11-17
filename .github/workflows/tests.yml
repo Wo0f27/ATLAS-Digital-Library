@@ -17,11 +17,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: "Diagnostic: new small OCR tests only"
+      - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q tests/test_small_region_ocr.py
-      - name: "Diagnostic: existing tests"
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q --ignore=tests/test_small_region_ocr.py
+        run: python -m pytest -q
