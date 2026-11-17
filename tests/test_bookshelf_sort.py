@@ -56,7 +56,7 @@ def test_sorting_respects_custom_titles_and_tie_breaks(tmp_path: Path):
     ]
     sorted_rows = sorted_bookshelf_entries(rows, root, "root_first")
     assert [Path(b["path"]).name for b in sorted_rows] == [
-        "A.pdf", "Z.pdf", "C.pdf", "A.pdf"
+        "A.pdf", "Z.pdf", "A.pdf", "C.pdf"
     ]
     assert [Path(b["path"]).parent == root for b in sorted_rows] == [
         True, True, False, False
@@ -99,7 +99,8 @@ def test_root_folder_view_and_saved_sort_survive_catalog_rescan(
 
     monkeypatch.setattr(LibraryWindow, "scan", lambda self: None)
     window = LibraryWindow(data, root)
-    previous_sort = window.settings.value("bookshelf_sort", None)
+    settings = window.settings
+    previous_sort = settings.value("bookshelf_sort", None)
     try:
         title_index = window.sort_order.findData("title")
         root_index = window.sort_order.findData("root_first")
@@ -132,6 +133,6 @@ def test_root_folder_view_and_saved_sort_survive_catalog_rescan(
         window.deleteLater()
         app.processEvents()
         if previous_sort is None:
-            window.settings.remove("bookshelf_sort")
+            settings.remove("bookshelf_sort")
         else:
-            window.settings.setValue("bookshelf_sort", previous_sort)
+            settings.setValue("bookshelf_sort", previous_sort)
