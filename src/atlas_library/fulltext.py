@@ -460,7 +460,8 @@ def index_pdf(
             return {
                 "pages": count, "indexed": 0, "mixed_checked": 0,
                 "mixed_added": 0, "region_checked": 0,
-                "region_candidates": 0, "region_added": 0, **final,
+                "region_candidates": 0, "region_added": 0,
+                "region_failed": 0, **final,
             }
 
         candidates = set(mixed_old) | set(small_old)
@@ -476,6 +477,7 @@ def index_pdf(
         region_checked = 0
         region_candidates = 0
         region_added = 0
+        region_failed = 0
         for page_index in indices:
             if cancel and cancel():
                 raise IndexCancelled()
@@ -550,6 +552,7 @@ def index_pdf(
                     except Exception as exc:
                         # Never overwrite native text when a crop or OCR step fails.
                         region_status = "error"
+                        region_failed += 1
                         region_error = f"{type(exc).__name__}: {exc}"
                         error = f"Region OCR page {page_index + 1}: {exc}"
             except Exception as exc:
@@ -559,6 +562,7 @@ def index_pdf(
                 elif is_old_small:
                     error = f"Region OCR page {page_index + 1}: {exc}"
                     region_status, region_error = "error", error
+                    region_failed += 1
                 else:
                     error = f"Mixed OCR page {page_index + 1}: {exc}"
                     hybrid_status = "error"
@@ -589,7 +593,8 @@ def index_pdf(
             "mixed_checked": mixed_checked, "mixed_added": mixed_added,
             "region_checked": region_checked,
             "region_candidates": region_candidates,
-            "region_added": region_added, **final,
+            "region_added": region_added,
+            "region_failed": region_failed, **final,
         }
     finally:
         document.close()
