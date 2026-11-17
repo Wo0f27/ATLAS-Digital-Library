@@ -21,6 +21,7 @@ from .reader import PdfReader
 from .organizer import MetadataDialog, CollectionMembershipDialog
 from .search_panel import SearchPanel
 from .bookshelf_sort import ROOT_ONLY_FOLDER, directly_in_root, sorted_bookshelf_entries
+from .reorganization import build_preview_rows, export_preview_csv
 
 
 class ScanThread(QThread):
@@ -106,6 +107,13 @@ class LibraryWindow(QMainWindow):
         self.scan_btn = QPushButton("Rescan")
         self.scan_btn.clicked.connect(self.scan)
         header.addWidget(self.scan_btn)
+        self.folder_plan_btn = QPushButton("Plan Folders")
+        self.folder_plan_btn.setToolTip(
+            "Export a read-only CSV proposing new library subject folders. "
+            "No PDF, bookmark, or OCR record will be changed."
+        )
+        self.folder_plan_btn.clicked.connect(self._export_reorganization_preview)
+        header.addWidget(self.folder_plan_btn)
         outer.addLayout(header)
 
         find_row = QHBoxLayout()
@@ -300,6 +308,59 @@ class LibraryWindow(QMainWindow):
             QComboBox, QTreeView { background: #222b37; color: #ece6d9;
                                    border: 1px solid #435166; padding: 5px; }
         """)
+
+    def _export_reorganization_preview(self):
+        """Export proposed classifications without relocating any PDF."""
+        if self.worker is not None:
+            QMessageBox.information(
+                self, "Scan in progress",
+                "Let the current library scan finish before exporting its inventory.",
+            )
+            return
+        if not self.root.is_dir():
+            QMessageBox.warning(
+                self, "Library unavailable",
+                "Choose an existing library folder before exporting a plan.",
+            )
+            return
+        books = self.catalog.available(self.root)
+        if not books:
+            QMessageBox.information(
+                self, "Library is empty",
+                "Scan your selected library first, then export the folder plan.",
+            )
+            return
+        documents = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        folder = Path(documents) if documents else Path.home()
+        suggested_file = folder / "ATLAS_Library_Reorganization_Preview.csv"
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "Export library reorganization preview",
+            str(suggested_file), "CSV files (*.csv)",
+        )
+        if not output_path:
+            return
+        try:
+            rows, summary = build_preview_rows(self.catalog, self.root, books)
+            export_preview_csv(Path(output_path), rows)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.critical(
+                self, "Preview export failed",
+                f"Could not export the reorganization plan:\n{exc}",
+            )
+            return
+        QMessageBox.information(
+            self, "Read-only preview exported",
+            f"Prepared {summary['total']} catalog records.\n"
+            f"Subject suggestions: {summary['proposed']}\n"
+            f"Awaiting classification: {summary['unclassified']}\n"
+            f"Possible destination collisions: {summary['collisions']}\n"
+            f"Missing/unreadable sources: {summary['missing']}\n\n"
+            "All proposals require review before any relocation.\n"
+            "No PDFs, metadata, bookmarks, or OCR indexes were modified.\n\n"
+            f"Saved to:\n{output_path}",
+        )
 
     def _load_existing(self):
         self.books = {book["path"]: book for book in self.catalog.available(self.root)}
