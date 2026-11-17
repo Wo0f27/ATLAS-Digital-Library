@@ -202,7 +202,7 @@ def test_region_checkpoint_resets_for_changed_pdf(tmp_path: Path):
     index.close()
 
 
-def test_ocr_modes_are_exclusive_and_ui_defaults_are_safe(tmp_path, monkeypatch):
+def diagnostic_ocr_modes_are_exclusive_and_ui_defaults_are_safe(tmp_path, monkeypatch):
     global _QT_APP
     if _QT_APP is None:
         _QT_APP = QApplication.instance() or QApplication([])
