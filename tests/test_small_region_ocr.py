@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import gc
 import zlib
 from pathlib import Path
+
+import pytest
 
 import pypdfium2 as pdfium
 from PIL import Image
@@ -19,6 +22,13 @@ from atlas_library.region_ocr import extract_small_region_text, small_image_regi
 # Prevent Qt's QApplication from being released while other test widgets
 # remain pending for deletion during a combined Windows pytest process.
 _QT_APP = None
+
+
+@pytest.fixture(autouse=True)
+def cleanup_native_pdf_resources():
+    """Release image/PDF wrapper finalizers before the next Windows GUI test."""
+    yield
+    gc.collect()
 
 
 def make_mixed_region_pdf(path: Path, phrase: str = "The elder wizard protects the mountain library."):
@@ -213,7 +223,6 @@ def diagnostic_ocr_modes_are_exclusive_and_ui_defaults_are_safe(tmp_path, monkey
     make_mixed_region_pdf(pdf)
     data = tmp_path / "private"
     index = PageIndex(data / "search.sqlite3")
-    import pytest
     with pytest.raises(ValueError, match="either"):
         index_pdf(
             index, pdf, root, mixed_ocr=True, small_region_ocr=True,
