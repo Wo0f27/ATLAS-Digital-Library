@@ -73,12 +73,22 @@ takes place in a worker thread; the bookshelf and PDF reader remain usable.
 Search options:
 - **All words:** requires every word (order-independent).
 - **Exact phrase:** requires the specified sequence.
+- **Fuzzy word:** accepts one misspelled Latin-alphabet word (e.g. dragn);
+  searches up to eight similar indexed terms sharing its initial letter.
+  This is bounded spelling tolerance, not semantic search or phrase correction.
+- **Regular expression:** runs a case-insensitive pattern against indexed page
+  text with per-page timeouts and a total 12-second/50,000-page safety limit.
+  It may return partial results and reports when it stops early.
 - **Boolean / FTS5:** supports SQLite FTS5 syntax such as
   "dragon AND ancient", '"legendary actions"', '"green dragon" OR "blue dragon"',
   and "NEAR(dragon treasure, 6)".
 
 Double-click a result to open the **specific page inside A.T.L.A.S.**. Only books
-in the active catalog root are displayed. Search results use your custom
+in the active catalog root are displayed. You can combine full-text searches
+with **tag**, **virtual shelf**, and **author/publisher/edition/system**
+filters. Filter matching happens before limiting results to the top 150.
+Select **Refresh filters** after changing book metadata while the Search tab
+is already open. Search results use your custom
 display titles where available. Searching currently matches page text, not
 personal metadata fields.
 
@@ -97,8 +107,11 @@ Current limitations:
 - OCR currently targets pages with empty or very short extractable text, not
   every image embedded in an otherwise text-rich page.
 - OCR quality depends on scan resolution, language, and unusual page layouts.
-- Fuzzy spelling matches, regex, advanced metadata facets, and OCR search
-  highlights inside the reader are not implemented yet.
+- Fuzzy search currently supports one Latin-alphabet word and is bounded by
+  vocabulary size; it cannot recognize every misspelling or search phrases.
+- Regular expressions operate within individual pages; slow or very broad
+  patterns may stop at a reported safety limit.
+- OCR search highlights inside the embedded reader are not implemented yet.
 - This development build **does not bundle Tesseract**. Bundling OCR and language
   packs for the future Windows installer is part of the distribution phase.
 
@@ -120,7 +133,7 @@ own computer**; it is excluded from GitHub, along with original PDFs.
 
 ## Upcoming work
 
-See docs/ROADMAP.md. The built-in reader, metadata editor, virtual shelves, and initial page-level full-text search/OCR are implemented. Advanced search operators beyond SQLite FTS5, refinements to OCR and search navigation, theming, and the standalone Windows .exe remain planned. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
+See docs/ROADMAP.md. The built-in reader, metadata editor, virtual shelves, page-level FTS5/OCR, and first fuzzy/regex/metadata facet controls are implemented. More advanced OCR, search highlighting, scalability benchmarking, theming, and the standalone Windows .exe remain planned. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
 
 ## Technology and licensing
 
