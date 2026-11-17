@@ -301,9 +301,13 @@ class PdfReader(QWidget):
         )
         self._ocr_preview = dialog
         dialog.destroyed.connect(
-            lambda _obj=None: setattr(self, "_ocr_preview", None)
+            lambda _obj=None, target=dialog: self._clear_preview_reference(target)
         )
         dialog.show()
+
+    def _clear_preview_reference(self, target):
+        if self._ocr_preview is target:
+            self._ocr_preview = None
 
     def _navigate_indexed_match(self, direction: int):
         candidate = self._indexed_match_position + direction
