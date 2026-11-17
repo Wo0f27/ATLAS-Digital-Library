@@ -26,7 +26,7 @@
 - [x] Virtual shelves, many-to-many book membership, and personal tags
 - [x] Validate shelf management and tag filtering on user's Windows machine
 
-## Milestone 3 — Full-text indexing and OCR (first implementation in progress)
+## Milestone 3 — Full-text indexing and OCR (core validated on Windows)
 
 - [x] SQLite FTS5 page-level search with sourcebook/page navigation
 - [x] Extract existing text using PDFium
@@ -38,7 +38,7 @@
 - [x] Preserve native text and avoid exact repeated lines when combining OCR results
 - [x] Validate mixed-content OCR on a real book using the single-book scope
 - [x] Optional small-raster-region OCR with independent resumable checkpoints
-- [ ] Validate small-region OCR against actual mixed-content sourcebook pages
+- [x] Validate small-region OCR against actual mixed-content sourcebook pages
 - [x] Initial fuzzy single-word and bounded regex search modes
 - [x] Search metadata, tag and shelf filters applied before result limiting
 - [x] FTS5 supports Boolean and NEAR proximity queries
@@ -52,10 +52,14 @@
 - [ ] Native QPdfView continuous-scroll coordinate overlays (requires reliable page geometry mapping)
 - [x] Read-only local search-index benchmark button and per-query timings
 - [x] Validate benchmark control and report display on user's Windows installation
-- [ ] Inspect real benchmark measurements and check index size on the user's large collection
+- [x] Inspect real benchmark measurements and check index size on the user's large collection
+  - Validated snapshot (Nov 2026): 194 books, 15,908 indexed pages, 897 OCR/mixed pages, 45,608,444 text characters, 80.96 MiB SQLite index; median sampled query 77.91 ms, slowest 90.46 ms (150-result cap). No immediate FTS performance optimization indicated.
 
-## Milestone 4 — Organization and personalization
+## Milestone 4 — Organization and personalization (started)
 
+- [x] Root-first bookshelf sorting (alphabetical within groups)
+- [x] Library-root-only folder selection without changing files
+- [ ] Validate root-first ordering and root-only filter on user's Windows installation
 - Duplicate review, multiple editions, series completeness
 - New-file inbox and non-destructive, approved physical moves
 - Backups, data exports, catalog recovery
