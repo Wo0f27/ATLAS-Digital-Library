@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt, QTimer, Signal, QSettings
 from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from .catalog import Catalog
 from .search_context import format_excerpt_html, source_label
+from .ocr_preview import OcrPositionDialog
 
 
 def clamp_page(page: int, page_count: int) -> int:
@@ -34,10 +35,13 @@ class PdfReader(QWidget):
     def __init__(
         self, path: Path, catalog: Catalog, parent: QWidget | None = None,
         start_page: int | None = None,
+        search_db_path: Path | None = None,
     ):
         super().__init__(parent)
         self.path = Path(path)
         self.catalog = catalog
+        self.search_db_path = Path(search_db_path) if search_db_path else None
+        self._ocr_preview = None
         self._loaded = False
         self._restoring = True
         self._match_index = -1
@@ -188,6 +192,14 @@ class PdfReader(QWidget):
         self.match_next = QPushButton("Next result")
         self.match_next.clicked.connect(lambda: self._navigate_indexed_match(1))
         controls.addWidget(self.match_next)
+        self.locate_ocr_button = QPushButton("Locate OCR words")
+        self.locate_ocr_button.setToolTip(
+            "Recognize word positions on this scanned PDF page, "
+            "then show a zoomable highlighted page preview"
+        )
+        self.locate_ocr_button.clicked.connect(self._locate_ocr_match)
+        self.locate_ocr_button.hide()
+        controls.addWidget(self.locate_ocr_button)
         self.match_close = QPushButton("Dismiss")
         self.match_close.clicked.connect(self.clear_search_matches)
         controls.addWidget(self.match_close)
@@ -199,8 +211,8 @@ class PdfReader(QWidget):
         self.match_excerpt.setOpenExternalLinks(False)
         match_layout.addWidget(self.match_excerpt)
         self.match_note = QLabel(
-            "The excerpt is highlighted in the local index. For OCR text, "
-            "its exact position within the PDF image is not yet available."
+            "The excerpt is highlighted in the local index. OCR word positions "
+            "can be inspected separately using Locate OCR words."
         )
         self.match_note.setWordWrap(True)
         match_layout.addWidget(self.match_note)
@@ -262,10 +274,36 @@ class PdfReader(QWidget):
         )
         self.match_previous.setEnabled(position > 0)
         self.match_next.setEnabled(position < len(self._indexed_matches) - 1)
+        self.locate_ocr_button.setVisible(
+            row.get("source") in ("ocr", "mixed")
+            and self.search_db_path is not None
+        )
         if self._loaded:
             self.goto_page(page_index)
         else:
             self._saved["page_index"] = page_index
+
+    def _locate_ocr_match(self):
+        if self.search_db_path is None or not self._indexed_matches:
+            return
+        row = self._indexed_matches[self._indexed_match_position]
+        if row.get("source") not in ("ocr", "mixed"):
+            return
+        if self._ocr_preview is not None:
+            self._ocr_preview.close()
+        settings = QSettings("ATLAS", "DigitalLibrary")
+        dialog = OcrPositionDialog(
+            self.search_db_path, self.path, int(row["page_index"]),
+            str(row.get("excerpt") or ""),
+            str(settings.value("ocr_language", "eng")),
+            str(settings.value("tesseract_path", "")),
+            parent=self,
+        )
+        self._ocr_preview = dialog
+        dialog.destroyed.connect(
+            lambda _obj=None: setattr(self, "_ocr_preview", None)
+        )
+        dialog.show()
 
     def _navigate_indexed_match(self, direction: int):
         candidate = self._indexed_match_position + direction
@@ -276,6 +314,7 @@ class PdfReader(QWidget):
         self._indexed_matches = []
         self._indexed_match_position = -1
         self.match_context.hide()
+        self.locate_ocr_button.hide()
         self.match_excerpt.clear()
 
     def _on_document_status(self, status):
@@ -581,6 +620,9 @@ class PdfReader(QWidget):
         )
 
     def dispose(self):
+        if self._ocr_preview is not None:
+            self._ocr_preview.close()
+            self._ocr_preview = None
         self._zoom_overlay_timer.stop()
         self._clear_zoom_overlay()
         self.save_state()
