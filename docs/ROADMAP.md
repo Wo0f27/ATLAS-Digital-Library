@@ -60,6 +60,10 @@
 - [x] Root-first bookshelf sorting (alphabetical within groups)
 - [x] Library-root-only folder selection without changing files
 - [ ] Validate root-first ordering and root-only filter on user's Windows installation
+- [x] Add read-only full-catalog subject reorganization CSV preview (no PDF moves)
+- [ ] Review classification and missing/changed/collision flags on user's current catalog
+- [ ] Design atomic, backed-up, reversible migration of all path-keyed catalog and OCR state
+- [ ] Verify physical reorganization after explicit row-level approval
 - Duplicate review, multiple editions, series completeness
 - New-file inbox and non-destructive, approved physical moves
 - Backups, data exports, catalog recovery
