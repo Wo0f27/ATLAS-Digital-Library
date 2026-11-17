@@ -20,6 +20,7 @@ from .scanner import scan_library
 from .reader import PdfReader
 from .organizer import MetadataDialog, CollectionMembershipDialog
 from .search_panel import SearchPanel
+from .bookshelf_sort import ROOT_ONLY_FOLDER, directly_in_root, sorted_bookshelf_entries
 
 
 class ScanThread(QThread):
@@ -120,6 +121,21 @@ class LibraryWindow(QMainWindow):
         self.view_filter.currentIndexChanged.connect(self._refresh_gallery)
         self.view_filter.setFixedWidth(175)
         find_row.addWidget(self.view_filter)
+
+        self.sort_order = QComboBox()
+        self.sort_order.addItem("Title A–Z", "title")
+        self.sort_order.addItem("Root folder first", "root_first")
+        saved_order = str(self.settings.value("bookshelf_sort", "title"))
+        self.sort_order.setCurrentIndex(
+            max(0, self.sort_order.findData(saved_order))
+        )
+        self.sort_order.setToolTip(
+            "Prioritize PDFs directly inside the chosen library folder, "
+            "or alphabetize all visible books together."
+        )
+        self.sort_order.currentIndexChanged.connect(self._change_sort_order)
+        self.sort_order.setFixedWidth(175)
+        find_row.addWidget(self.sort_order)
         outer.addLayout(find_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -350,7 +366,10 @@ class LibraryWindow(QMainWindow):
         top = QTreeWidgetItem(["All Books"])
         top.setData(0, Qt.ItemDataRole.UserRole, "")
         self.tree.addTopLevelItem(top)
-        nodes = {"": top}
+        direct = QTreeWidgetItem(["Library root (PDFs only)"])
+        direct.setData(0, Qt.ItemDataRole.UserRole, ROOT_ONLY_FOLDER)
+        top.addChild(direct)
+        nodes = {"": top, ROOT_ONLY_FOLDER: direct}
         for book in self.books.values():
             try:
                 relative = Path(book["path"]).relative_to(self.root)
@@ -461,6 +480,10 @@ class LibraryWindow(QMainWindow):
         self._refresh_navigation()
         self._refresh_gallery()
 
+    def _change_sort_order(self, _index: int):
+        self.settings.setValue("bookshelf_sort", self.sort_order.currentData())
+        self._refresh_gallery()
+
     def _select_folder(self):
         item = self.tree.currentItem()
         self.active_folder = str(item.data(0, Qt.ItemDataRole.UserRole) or "") if item else ""
@@ -481,19 +504,22 @@ class LibraryWindow(QMainWindow):
         self.gallery.blockSignals(True)
         self.gallery.clear()
         visible = 0
-        for book in sorted(
-            self.books.values(),
-            key=lambda b: (b.get("display_title") or b["title"]).casefold(),
+        for book in sorted_bookshelf_entries(
+            self.books.values(), self.root, self.sort_order.currentData(),
         ):
             try:
                 relative = Path(book["path"]).relative_to(self.root)
             except ValueError:
                 continue
             if nav_index == 0 and self.active_folder:
-                prefix = self.active_folder.replace("/", "\\") if sys.platform == "win32" else self.active_folder
-                relative_parent = str(relative.parent)
-                if relative_parent != prefix and not relative_parent.startswith(prefix + ("\\" if sys.platform == "win32" else "/")):
-                    continue
+                if self.active_folder == ROOT_ONLY_FOLDER:
+                    if not directly_in_root(book["path"], self.root):
+                        continue
+                else:
+                    prefix = self.active_folder.replace("/", "\\") if sys.platform == "win32" else self.active_folder
+                    relative_parent = str(relative.parent)
+                    if relative_parent != prefix and not relative_parent.startswith(prefix + ("\\" if sys.platform == "win32" else "/")):
+                        continue
             title = book.get("display_title") or book["title"]
             if query and not any(
                 query in value.casefold() for value in (
