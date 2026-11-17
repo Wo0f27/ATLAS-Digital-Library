@@ -33,9 +33,13 @@
 - [x] Offline OCR via locally installed Tesseract for textless/near-empty pages
 - [x] Background indexer with cancellation, incremental updates, and per-page resume
 - [x] Search modes: all words, exact phrase, and user-authored FTS5 Boolean/NEAR
-- [ ] Validate indexing, page links, OCR, and resume on user's Windows library
+- [x] Validate indexing, page links, OCR, and resume on user's Windows library
 - [ ] OCR advanced handling for pages mixing substantial text and scanned images
-- [ ] Advanced fuzzy/proximity/regex search options and metadata facets
+- [x] Initial fuzzy single-word and bounded regex search modes
+- [x] Search metadata, tag and shelf filters applied before result limiting
+- [x] FTS5 supports Boolean and NEAR proximity queries
+- [ ] Validate fuzzy/regex and metadata filters on user's Windows machine
+- [ ] Expand approximate multi-word queries and additional search refinements
 - [ ] Search in reader highlights for OCR results
 - [ ] Performance benchmark and index-size checks on a large collection
 

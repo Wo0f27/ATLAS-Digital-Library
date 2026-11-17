@@ -252,8 +252,12 @@ class LibraryWindow(QMainWindow):
             books_getter=lambda: self.books,
             open_result=self._open_search_result,
             parent=self.tabs,
+            catalog_getter=lambda: self.catalog,
         )
         self.tabs.addTab(self.search_panel, "Full-Text Search")
+        self.tabs.currentChanged.connect(
+            lambda index: self.search_panel.refresh_filters() if index == 1 else None
+        )
         self.tabs.tabBar().setTabButton(
             1, QTabBar.ButtonPosition.RightSide, None
         )
@@ -286,6 +290,7 @@ class LibraryWindow(QMainWindow):
         self._refresh_folders()
         self._refresh_navigation()
         self._refresh_gallery()
+        self.search_panel.refresh_filters()
         self.status.setText(f"{len(self.books)} cataloged books | {self.root}")
 
     def choose_folder(self):
