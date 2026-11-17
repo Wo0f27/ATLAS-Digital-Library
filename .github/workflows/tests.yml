@@ -17,13 +17,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-      - name: "Diagnostic: base + region tests 1 and 2"
-        continue-on-error: true
+      - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q -k "not test_failed_region_ocr_retries_and_does_not_erase_previous_text and not test_region_checkpoint_resets_for_changed_pdf"
-      - name: "Diagnostic: base + region tests 3 and 4"
-        continue-on-error: true
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q -k "not test_small_raster_bounds_and_crop_exclude_decorative_icon and not test_small_region_ocr_adds_only_new_text_and_checkpoints"
+        run: python -m pytest -q
