@@ -14,6 +14,7 @@ A native, offline-first Windows digital bookshelf for your personal document col
 - Choose **Root folder first** in the bookshelf sort menu to prioritize PDFs directly inside the selected library folder, with titles alphabetized within each group.
 - Use **Folders → All Books → Library root (PDFs only)** to view only those top-level PDFs, excluding nested subfolders.
 - Export a **Plan Folders** CSV of the current catalog with proposed subject classification, metadata, virtual shelf memberships and review flags; the export never moves PDFs.
+- **Review Duplicates** exports read-only SHA-256-confirmed exact-duplicate groups and *possible* edition/variant title groups; every suggested decision remains pending, with no automatic removals.
 - Double-click a book to read it in a tab inside A.T.L.A.S.
 - Embedded reader: previous/next page, page number jump, continuous or single-page mode, fit-to-width/page, custom zoom, PDF table of contents and in-book text search.
 - Last page and viewing preferences saved automatically in the local catalog.
@@ -123,6 +124,30 @@ The exported CSV contains local file paths and bibliographic fields, but not
 PDF contents or private research notes. Review it before sharing it with
 anyone. The output uses UTF-8 with a BOM so Excel can display accented
 filenames and fantasy-book titles correctly.
+
+## Duplicate and edition review (read-only)
+
+After a Rescan, choose **Review Duplicates** on the Bookshelf and save the
+CSV report *outside* your sourcebook library (Documents is the default).
+The work runs in a background thread and can be interrupted by closing the
+app. Every same-sized cataloged file is checked with full-file SHA-256
+before an **EXACT_SHA256** match is claimed. Matching normalized filenames
+with different or unverified content are listed separately as
+**POSSIBLE_EDITION_OR_VARIANT**. Differences in title spelling, punctuation,
+version suffixes, or printing labels alone are not proof of duplication.
+A missing, changed, or unreadable source is flagged rather than compared.
+
+The report lists file paths, potential match groups, SHA-256 digests when
+computed, and PENDING decisions. A title-based candidate must be inspected
+manually for content, edition and printing. Even a byte-identical duplicate
+can have path-bound reader/metadata/OCR state: inspect and preserve it before
+approving any future removal. This feature **does not rename, recycle, delete,
+move, reindex, or modify any source PDF or SQLite database**.
+
+A report is a point-in-time snapshot. Rescan and export again after new
+downloads or any library changes. Series-completeness research and an
+approval-controlled in-app duplicate consolidator remain later Milestone 4
+tasks.
 
 ## Full-text indexing and offline OCR
 
@@ -278,7 +303,7 @@ own computer**; it is excluded from GitHub, along with original PDFs.
 
 ## Upcoming work
 
-See docs/ROADMAP.md. The Windows-validated reader, metadata editor, virtual shelves, full-text/OCR search, in-reader OCR highlights and local index benchmarking are implemented. Further OCR/search enhancements are optional refinements; duplicate management, customizable themes, backups and the standalone Windows .exe remain planned. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
+See docs/ROADMAP.md. The Windows-validated reader, metadata editor, virtual shelves, full-text/OCR search, in-reader OCR highlights and local index benchmarking are implemented. Further OCR/search enhancements are optional refinements; in-app duplicate removal, series-completeness review, customizable themes, backups and the standalone Windows .exe remain planned. Read-only duplicate/edition CSV review is implemented. Obsidian / conversational integration is intentionally deferred until after the core app is complete.
 
 ## Technology and licensing
 
