@@ -22,6 +22,9 @@ from .organizer import MetadataDialog, CollectionMembershipDialog
 from .search_panel import SearchPanel
 from .bookshelf_sort import ROOT_ONLY_FOLDER, directly_in_root, sorted_bookshelf_entries
 from .reorganization import build_preview_rows, export_preview_csv
+from .duplicate_review import (
+    ReviewCancelled, build_duplicate_review, export_duplicate_review,
+)
 
 
 class ScanThread(QThread):
@@ -46,6 +49,35 @@ class ScanThread(QThread):
             self.completed.emit(count, "")
         except Exception as exc:
             self.completed.emit(count, str(exc))
+
+
+class DuplicateReviewThread(QThread):
+    """Read current PDFs on a worker thread; export a CSV outside the library."""
+
+    completed = Signal(object, str)
+
+    def __init__(self, root: Path, books: list[dict], destination: Path):
+        super().__init__()
+        self.root = root
+        self.books = books
+        self.destination = destination
+
+    def run(self):
+        try:
+            rows, summary = build_duplicate_review(
+                self.root, self.books,
+                interrupted=lambda: self.isInterruptionRequested(),
+            )
+            if self.isInterruptionRequested():
+                raise ReviewCancelled()
+            export_duplicate_review(self.destination, rows, self.root)
+        except ReviewCancelled:
+            self.completed.emit(None, "Review cancelled; no report created.")
+            return
+        except (OSError, ValueError) as exc:
+            self.completed.emit(None, str(exc))
+            return
+        self.completed.emit(summary, "")
 
 
 def placeholder_icon() -> QIcon:
@@ -75,6 +107,7 @@ class LibraryWindow(QMainWindow):
         self.books: dict[str, dict] = {}
         self.reader_tabs: dict[str, PdfReader] = {}
         self.worker: ScanThread | None = None
+        self.duplicate_worker: DuplicateReviewThread | None = None
         self.active_folder = ""
         self.selected_path = ""
         self._nav_refreshing = False
@@ -114,6 +147,13 @@ class LibraryWindow(QMainWindow):
         )
         self.folder_plan_btn.clicked.connect(self._export_reorganization_preview)
         header.addWidget(self.folder_plan_btn)
+        self.duplicate_btn = QPushButton("Review Duplicates")
+        self.duplicate_btn.setToolTip(
+            "Export a read-only SHA-256 exact-duplicate and possible-edition "
+            "report. No books are moved, renamed or deleted."
+        )
+        self.duplicate_btn.clicked.connect(self._export_duplicate_review)
+        header.addWidget(self.duplicate_btn)
         outer.addLayout(header)
 
         find_row = QHBoxLayout()
@@ -308,6 +348,81 @@ class LibraryWindow(QMainWindow):
             QComboBox, QTreeView { background: #222b37; color: #ece6d9;
                                    border: 1px solid #435166; padding: 5px; }
         """)
+
+    def _export_duplicate_review(self):
+        if self.worker is not None or self.duplicate_worker is not None:
+            QMessageBox.information(
+                self, "Library busy",
+                "Finish the current scan or duplicate review before exporting.",
+            )
+            return
+        if not self.root.is_dir():
+            QMessageBox.warning(
+                self, "Library unavailable",
+                "Choose an existing library folder before reviewing duplicates.",
+            )
+            return
+        books = self.catalog.available(self.root)
+        if not books:
+            QMessageBox.information(
+                self, "Library is empty", "Rescan your library first.",
+            )
+            return
+        documents = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        base = Path(documents) if documents else Path.home()
+        chosen, _ = QFileDialog.getSaveFileName(
+            self, "Export read-only duplicate and edition review",
+            str(base / "ATLAS_Duplicate_Edition_Review.csv"),
+            "CSV files (*.csv)",
+        )
+        if not chosen:
+            return
+        destination = Path(chosen).resolve()
+        if destination == self.root or self.root in destination.parents:
+            QMessageBox.warning(
+                self, "Choose a different location",
+                "Save the review report outside the PDF library.",
+            )
+            return
+        self.duplicate_btn.setEnabled(False)
+        self.folder_plan_btn.setEnabled(False)
+        self.scan_btn.setEnabled(False)
+        self.choose_btn.setEnabled(False)
+        self.status.setText(
+            "Checking possible duplicates (full SHA-256 when sizes match)..."
+        )
+        task = DuplicateReviewThread(self.root, books, destination)
+        self.duplicate_worker = task
+        task.completed.connect(self._duplicate_review_completed)
+        task.finished.connect(self._duplicate_review_finished)
+        task.start()
+
+    def _duplicate_review_completed(self, summary, error):
+        if error:
+            QMessageBox.warning(self, "Duplicate review", error)
+            return
+        QMessageBox.information(
+            self, "Duplicate and edition review exported",
+            f"Catalog books checked: {summary['catalog_books']}\n"
+            f"Confirmed byte-identical groups: {summary['exact_groups']}\n"
+            f"Files in those groups: {summary['exact_files']}\n"
+            f"Possible edition/title groups: {summary['possible_edition_groups']}\n"
+            f"Files hashed: {summary['files_hashed']}\n"
+            f"Missing/changed/unreadable warnings: {summary['source_warnings']}\n\n"
+            "Every decision remains PENDING. No PDF or database record was changed.",
+        )
+
+    def _duplicate_review_finished(self):
+        if self.duplicate_worker is not None:
+            self.duplicate_worker.deleteLater()
+        self.duplicate_worker = None
+        self.duplicate_btn.setEnabled(True)
+        self.folder_plan_btn.setEnabled(True)
+        self.scan_btn.setEnabled(True)
+        self.choose_btn.setEnabled(True)
+        self.status.setText(f"{len(self.books)} cataloged books | {self.root}")
 
     def _export_reorganization_preview(self):
         """Export proposed classifications without relocating any PDF."""
@@ -845,6 +960,9 @@ class LibraryWindow(QMainWindow):
         reader.deleteLater()
 
     def closeEvent(self, event):
+        if self.duplicate_worker is not None:
+            self.duplicate_worker.requestInterruption()
+            self.duplicate_worker.wait()
         if self.worker is not None:
             self.worker.requestInterruption()
             self.worker.wait()
